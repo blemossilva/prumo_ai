@@ -15,18 +15,45 @@ Deno.serve(async (req: Request) => {
     }
 
     try {
-        const { message } = await req.json();
+        const { message, agent_id } = await req.json();
         const supabase = createClient(
             Deno.env.get('SUPABASE_URL') ?? '',
             Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
         );
 
-        // 1. Get settings
-        const { data: settings } = await supabase.from('llm_settings').select('*').single();
-        const provider = settings?.provider || 'openai';
-        const model = settings?.model || 'gpt-4o-mini';
+        // 1. Get Settings (Agent-specific or Global)
+        let model = 'gpt-4o-mini';
+        let provider = 'openai';
+        let systemPrompt = 'És um assistente útil.';
+        let knowledgeText = '';
 
-        // 2. Generate Embedding using Gemini (stable in this project)
+        if (agent_id) {
+            const { data: agent } = await supabase
+                .from('agents')
+                .select('*')
+                .eq('id', agent_id)
+                .single();
+
+            if (agent) {
+                model = agent.model || model;
+                provider = agent.provider || provider;
+                systemPrompt = agent.system_prompt || systemPrompt;
+                knowledgeText = agent.knowledge_text || '';
+            }
+        } else {
+            const { data: globalSettings } = await supabase
+                .from('llm_settings')
+                .select('*')
+                .single();
+
+            if (globalSettings) {
+                model = globalSettings.model || model;
+                provider = globalSettings.provider || provider;
+                systemPrompt = globalSettings.system_prompt || systemPrompt;
+            }
+        }
+
+        // 2. Generate Embedding using Gemini
         const embRes = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/text-embedding-004:embedContent?key=${GOOGLE_AI_KEY}`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -37,20 +64,24 @@ Deno.serve(async (req: Request) => {
         const embData = await embRes.json();
         const queryEmbedding = embData.embedding.values;
 
-        // 3. Search
+        // 3. Search related chunks for this specific agent
         const { data: documents } = await supabase.rpc('match_document_chunks', {
             query_embedding: queryEmbedding,
             match_threshold: 0.1,
             match_count: 5,
+            p_agent_id: agent_id || null
         });
 
-        const contextText = documents?.map((doc: any) => doc.content).join("\n---\n") || "Nenhuma informação no manual.";
-        const systemPrompt = settings?.system_prompt || "És um assistente de RH.";
-        const fullPrompt = `Contexto:\n${contextText}\n\nPergunta: ${message}`;
+        const vectorContext = documents?.map((doc: any) => doc.content).join("\n---\n") || "";
+
+        // Combine manual knowledge text + vector context
+        const contextText = [knowledgeText, vectorContext].filter(Boolean).join("\n---\n") || "Nenhuma informação adicional disponível.";
+
+        const fullPrompt = `Contexto de Conhecimento:\n${contextText}\n\nPergunta do Utilizador: ${message}`;
 
         let reply = "";
 
-        // 4. LLM call (Keep flexible provider)
+        // 4. LLM call
         if (provider === 'gemini') {
             const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${GOOGLE_AI_KEY}`, {
                 method: "POST",
@@ -66,7 +97,10 @@ Deno.serve(async (req: Request) => {
                 headers: { "Authorization": `Bearer ${OPENAI_API_KEY}`, "Content-Type": "application/json" },
                 body: JSON.stringify({
                     model: model,
-                    messages: [{ role: "system", content: systemPrompt }, { role: "user", content: fullPrompt }],
+                    messages: [
+                        { role: "system", content: systemPrompt },
+                        { role: "user", content: fullPrompt }
+                    ],
                 }),
             });
             const data = await response.json();

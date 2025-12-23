@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 500 150">
+  <defs>
+    <linearGradient id="grad1" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" style="stop-color:#0A2463;stop-opacity:1" /> <stop offset="100%" style="stop-color:#3E54AC;stop-opacity:1" /> </linearGradient>
+  </defs>
+  <g transform="translate(50, 35)">
+    <path fill="url(#grad1)" d="M38.6,0 C59.9,0 77.2,17.3 77.2,38.6 L77.2,41.4 C77.2,52 68.6,60.6 58,60.6 L20,60.6 C9.4,60.6 0.8,52 0.8,41.4 L0.8,38.6 C0.8,17.3 18.1,0 38.6,0 Z" />
+    <path fill="url(#grad1)" d="M58,19.4 L20,19.4 C9.4,19.4 0.8,28 0.8,38.6 L0.8,41.4 C0.8,62.7 18.1,80 38.6,80 C59.1,80 76.4,62.7 76.4,41.4 L76.4,38.6 C76.4,28 67.8,19.4 58.2,19.4 L58,19.4 Z" opacity="0.85"/>
+    <path fill="#ffffff" d="M38.6,15 C25.6,15 15,25.6 15,38.6 L15,41.4 C15,44.2 17.2,46.4 20,46.4 L58,46.4 C60.8,46.4 63,44.2 63,41.4 L63,38.6 C63,25.6 51.6,15 38.6,15 Z" />
+  </g>
+
+  <text x="150" y="95" font-family="'Inter', 'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="700" font-size="48" fill="#0A2463">Nexio</text>
+  <text x="300" y="95" font-family="'Inter', 'Helvetica Neue', Helvetica, Arial, sans-serif" font-weight="500" font-size="48" fill="#3E54AC">AI</text>
+  
+
+</svg>

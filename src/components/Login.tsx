@@ -37,51 +37,68 @@ export const Login = () => {
     };
 
     return (
-        <div className="min-h-screen bg-slate-50 flex items-center justify-center p-4">
-            <div className="max-w-md w-full bg-white rounded-3xl shadow-xl p-8 border border-slate-100">
-                <div className="flex flex-col items-center mb-10">
-                    <div className="w-20 h-20 bg-primary-600 rounded-[2rem] flex items-center justify-center text-white mb-6 shadow-xl shadow-primary-500/10">
-                        <LogIn size={36} />
+        <div className="relative min-h-screen flex items-center justify-center p-4 transition-colors duration-500 overflow-hidden">
+            {/* Background Image Layer */}
+            <div
+                className="absolute inset-0 bg-cover bg-center bg-no-repeat scale-105"
+                style={{ backgroundImage: 'url("/login_bg.png")' }}
+            />
+
+            {/* Overlay Layers */}
+            <div className="absolute inset-0 bg-white/40 dark:bg-slate-950/60 backdrop-blur-xl transition-colors duration-500" />
+            <div className="absolute inset-0 bg-gradient-to-br from-primary-500/10 via-transparent to-primary-900/20" />
+
+            {/* Login Card */}
+            <div className="relative max-w-md w-full bg-white/70 dark:bg-slate-900/80 rounded-[3rem] shadow-[0_32px_64px_-16px_rgba(0,0,0,0.15)] p-10 md:p-12 border border-white/50 dark:border-white/10 animate-in fade-in zoom-in duration-700 backdrop-blur-md">
+                <div className="flex flex-col items-center mb-12 text-center">
+                    <div className="w-full max-w-[240px] mb-8 drop-shadow-2xl hover:scale-105 transition-transform duration-500">
+                        <img
+                            src="/nexio_ai_logo.svg"
+                            alt="Nexio AI"
+                            className="w-full h-auto object-contain dark:brightness-110"
+                        />
                     </div>
-                    <h1 className="text-3xl font-bold text-slate-800 tracking-tight">Prumo AI</h1>
-                    <p className="text-slate-500 mt-2 text-center">
-                        {isSignUp ? 'Crie sua conta corporativa' : 'Faça login para aceder ao assistente'}
+                    <p className="text-primary-700 dark:text-primary-400 font-black tracking-[0.3em] uppercase text-[10px] -mt-6 opacity-80">
+                        O conhecimento que une equipas
+                    </p>
+                    <p className="text-slate-600 dark:text-slate-400 mt-10 text-sm leading-relaxed font-medium">
+                        {isSignUp ? 'Crie sua conta corporativa para começar' : 'Faça login para aceder ao conhecimento da sua equipa'}
                     </p>
                 </div>
 
-                <form onSubmit={handleAuth} className="space-y-4">
-                    <div>
-                        <label className="block text-sm font-medium text-slate-700 mb-1">Email</label>
-                        <div className="relative">
-                            <Mail className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
+                <form onSubmit={handleAuth} className="space-y-6">
+                    <div className="space-y-2">
+                        <label className="block text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest px-2">E-mail de Trabalho</label>
+                        <div className="relative group">
+                            <Mail className="absolute left-5 top-1/2 -translate-y-1/2 text-slate-400 group-focus-within:text-primary-500 transition-colors" size={18} />
                             <input
                                 type="email"
                                 required
                                 value={email}
                                 onChange={(e) => setEmail(e.target.value)}
-                                className="w-full pl-10 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-primary-400 focus:border-transparent transition-all outline-none"
+                                className="w-full pl-14 pr-6 py-4 bg-white/50 dark:bg-slate-800/40 border border-slate-200/50 dark:border-white/5 rounded-[1.5rem] focus:ring-4 focus:ring-primary-500/10 focus:border-primary-500/50 transition-all outline-none dark:text-white placeholder:text-slate-400 font-medium"
                                 placeholder="nome@empresa.com"
                             />
                         </div>
                     </div>
 
-                    <div>
-                        <label className="block text-sm font-medium text-slate-700 mb-1">Password</label>
-                        <div className="relative">
-                            <Lock className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
+                    <div className="space-y-2">
+                        <label className="block text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest px-2">Password</label>
+                        <div className="relative group">
+                            <Lock className="absolute left-5 top-1/2 -translate-y-1/2 text-slate-400 group-focus-within:text-primary-500 transition-colors" size={18} />
                             <input
                                 type="password"
                                 required
                                 value={password}
                                 onChange={(e) => setPassword(e.target.value)}
-                                className="w-full pl-10 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-primary-400 focus:border-transparent transition-all outline-none"
+                                className="w-full pl-14 pr-6 py-4 bg-white/50 dark:bg-slate-800/40 border border-slate-200/50 dark:border-white/5 rounded-[1.5rem] focus:ring-4 focus:ring-primary-500/10 focus:border-primary-500/50 transition-all outline-none dark:text-white placeholder:text-slate-400 font-medium"
                                 placeholder="••••••••"
                             />
                         </div>
                     </div>
 
                     {error && (
-                        <div className="p-3 bg-red-50 text-red-600 text-sm rounded-xl border border-red-100">
+                        <div className="p-4 bg-red-500/10 text-red-600 dark:text-red-400 text-xs rounded-2xl border border-red-500/20 font-bold backdrop-blur-sm">
                             {error}
                         </div>
                     )}
@@ -89,29 +106,26 @@ export const Login = () => {
                     <button
                         type="submit"
                         disabled={loading}
-                        className="w-full py-3 bg-primary-600 text-white rounded-xl font-bold flex items-center justify-center gap-2 hover:bg-primary-700 transition-all disabled:opacity-50 shadow-lg shadow-primary-100"
+                        className="w-full py-4.5 bg-primary-600 dark:bg-primary-500 text-white rounded-2xl font-black flex items-center justify-center gap-3 hover:bg-primary-700 dark:hover:bg-primary-600 transition-all disabled:opacity-50 shadow-[0_20px_40px_-12px_rgba(62,84,172,0.35)] hover:shadow-[0_25px_50px_-12px_rgba(62,84,172,0.45)] active:scale-[0.98] group"
                     >
                         {loading ? (
                             <Loader2 className="animate-spin" size={20} />
                         ) : (
-                            isSignUp ? 'Criar Conta' : 'Aceder Agora'
+                            <div className="flex items-center gap-2">
+                                <span className="text-sm tracking-tight">{isSignUp ? 'Criar Conta Corporativa' : 'Aceder Agora'}</span>
+                                <LogIn size={18} className="group-hover:translate-x-1 transition-transform" />
+                            </div>
                         )}
                     </button>
                 </form>
 
-                <div className="mt-6 text-center">
+                <div className="mt-10 text-center">
                     <button
                         onClick={() => setIsSignUp(!isSignUp)}
-                        className="text-sm text-slate-500 hover:text-primary-600 transition-colors"
+                        className="text-[10px] font-black text-slate-500 dark:text-slate-400 hover:text-primary-600 dark:hover:text-primary-400 transition-colors uppercase tracking-[0.2em]"
                     >
                         {isSignUp ? 'Já tem conta? Faça login' : 'Primeiro acesso? Crie uma conta'}
                     </button>
-                </div>
-
-                <div className="mt-8 pt-6 border-t border-slate-100 text-center">
-                    <p className="text-[10px] text-slate-400 uppercase tracking-widest font-bold">
-                        Portal de RH Corporativo
-                    </p>
                 </div>
             </div>
         </div>

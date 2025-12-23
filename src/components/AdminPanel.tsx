@@ -11,8 +11,17 @@ import {
     ArrowLeft,
     LayoutDashboard,
     Plus,
-    X
+    X,
+    FolderPlus,
+    Search
 } from 'lucide-react';
+
+interface Group {
+    id: string;
+    name: string;
+    description: string;
+}
+
 
 interface Document {
     id: string;
@@ -33,10 +42,11 @@ interface Agent {
     provider: string;
     model: string;
     suggested_prompts?: string[] | null;
+    knowledge_text?: string;
 }
 
 export const AdminPanel = ({ onBack }: { onBack: () => void }) => {
-    const [activeTab, setActiveTab] = useState<'users' | 'agents'>('agents');
+    const [activeTab, setActiveTab] = useState<'users' | 'agents' | 'groups'>('agents');
     const [documents, setDocuments] = useState<Document[]>([]);
     const [uploading, setUploading] = useState(false);
     const [loading, setLoading] = useState(true);
@@ -51,6 +61,20 @@ export const AdminPanel = ({ onBack }: { onBack: () => void }) => {
     const [editingAgent, setEditingAgent] = useState<Agent | null>(null);
     const [savingAgent, setSavingAgent] = useState(false);
 
+    // Group management state
+    const [groups, setGroups] = useState<Group[]>([]);
+    const [loadingGroups, setLoadingGroups] = useState(false);
+    const [editingGroup, setEditingGroup] = useState<Group | null>(null);
+    const [savingGroup, setSavingGroup] = useState(false);
+    const [groupMembers, setGroupMembers] = useState<string[]>([]); // list of user_ids
+    const [groupAgents, setGroupAgents] = useState<string[]>([]);   // list of agent_ids
+    const [searchTerm, setSearchTerm] = useState('');
+
+    // State for managing user-group associations outside of group tab
+    const [userGroups, setUserGroups] = useState<Record<string, string[]>>({});
+    const [agentGroups, setAgentGroups] = useState<Record<string, string[]>>({});
+
+
     useEffect(() => {
         fetchDocuments();
     }, []);
@@ -59,11 +83,121 @@ export const AdminPanel = ({ onBack }: { onBack: () => void }) => {
         if (activeTab === 'agents') {
             fetchAgents();
             fetchDocuments();
+            fetchGroups();
+            fetchAllAgentGroups();
         }
         if (activeTab === 'users') {
             fetchUsers();
+            fetchGroups();
+            fetchAllUserGroups();
+        }
+        if (activeTab === 'groups') {
+            fetchGroups();
+            fetchUsers();
+            fetchAgents();
         }
     }, [activeTab]);
+
+    const fetchGroups = async () => {
+        setLoadingGroups(true);
+        const { data } = await supabase.from('user_groups').select('*').order('name');
+        if (data) setGroups(data);
+        setLoadingGroups(false);
+    };
+
+    const fetchAllUserGroups = async () => {
+        const { data } = await supabase.from('user_group_members').select('*');
+        if (data) {
+            const mapping: Record<string, string[]> = {};
+            data.forEach((m: any) => {
+                if (!mapping[m.user_id]) mapping[m.user_id] = [];
+                mapping[m.user_id].push(m.group_id);
+            });
+            setUserGroups(mapping);
+        }
+    };
+
+    const fetchAllAgentGroups = async () => {
+        const { data } = await supabase.from('user_group_agents').select('*');
+        if (data) {
+            const mapping: Record<string, string[]> = {};
+            data.forEach((m: any) => {
+                if (!mapping[m.agent_id]) mapping[m.agent_id] = [];
+                mapping[m.agent_id].push(m.group_id);
+            });
+            setAgentGroups(mapping);
+        }
+    };
+
+    const fetchGroupDetails = async (groupId: string) => {
+        const { data: members } = await supabase.from('user_group_members').select('user_id').eq('group_id', groupId);
+        const { data: agentsData } = await supabase.from('user_group_agents').select('agent_id').eq('group_id', groupId);
+
+        if (members) setGroupMembers(members.map(m => m.user_id));
+        if (agentsData) setGroupAgents(agentsData.map(a => a.agent_id));
+    };
+
+    const saveGroup = async (e: React.FormEvent) => {
+        e.preventDefault();
+        if (!editingGroup) return;
+        setSavingGroup(true);
+
+        try {
+            const { id, ...rest } = editingGroup;
+            const groupData = id
+                ? { id, ...rest, updated_at: new Date().toISOString() }
+                : { ...rest, updated_at: new Date().toISOString() };
+
+            const { data, error } = await supabase
+                .from('user_groups')
+                .upsert(groupData)
+                .select()
+                .single();
+
+            if (error) throw error;
+
+            if (data) {
+                const groupId = data.id;
+
+                // Sync members
+                await supabase.from('user_group_members').delete().eq('group_id', groupId);
+                if (groupMembers.length > 0) {
+                    const { error: memberError } = await supabase.from('user_group_members').insert(
+                        groupMembers.map(userId => ({ group_id: groupId, user_id: userId }))
+                    );
+                    if (memberError) throw memberError;
+                }
+
+                // Sync agents
+                await supabase.from('user_group_agents').delete().eq('group_id', groupId);
+                if (groupAgents.length > 0) {
+                    const { error: agentError } = await supabase.from('user_group_agents').insert(
+                        groupAgents.map(agentId => ({ group_id: groupId, agent_id: agentId }))
+                    );
+                    if (agentError) throw agentError;
+                }
+
+                setEditingGroup(null);
+                fetchGroups();
+                fetchAllUserGroups();
+                fetchAllAgentGroups();
+                alert('Grupo guardado com sucesso!');
+            }
+        } catch (err: any) {
+            console.error('Error saving group:', err);
+            alert(`Erro ao guardar grupo: ${err.message}`);
+        } finally {
+            setSavingGroup(false);
+        }
+    };
+
+    const deleteGroup = async (id: string) => {
+        if (!confirm('Eliminar este grupo permanentemente?')) return;
+        const { error } = await supabase.from('user_groups').delete().eq('id', id);
+        if (error) alert('Erro ao eliminar grupo');
+        else fetchGroups();
+    };
+
 
     const fetchAgents = async () => {
         setLoadingAgents(true);
@@ -290,6 +424,13 @@ export const AdminPanel = ({ onBack }: { onBack: () => void }) => {
                     >
                         <Users size={18} /> Gestão de Utilizadores
                     </button>
+                    <button
+                        onClick={() => setActiveTab('groups')}
+                        className={`flex items-center gap-3 p-3 text-xs rounded-xl transition-all font-semibold ${activeTab === 'groups' ? 'bg-primary-500/10 text-primary-700 dark:text-primary-400' : 'text-slate-600 dark:text-slate-400 hover:bg-slate-200/40'}`}
+                    >
+                        <LayoutDashboard size={18} /> Gestão de Grupos
+                    </button>
+
                 </nav>
 
                 {/* Admin Content */}
@@ -319,6 +460,7 @@ export const AdminPanel = ({ onBack }: { onBack: () => void }) => {
                                             <thead>
                                                 <tr className="bg-slate-50 border-b border-slate-100">
                                                     <th className="p-4 text-[10px] font-bold text-slate-400 uppercase tracking-wider">Utilizador</th>
+                                                    <th className="p-4 text-[10px] font-bold text-slate-400 uppercase tracking-wider">Grupos</th>
                                                     <th className="p-4 text-[10px] font-bold text-slate-400 uppercase tracking-wider">Cargo</th>
                                                     <th className="p-4 text-[10px] font-bold text-slate-400 uppercase tracking-wider">Estado</th>
                                                     <th className="p-4 text-[10px] font-bold text-slate-400 uppercase tracking-wider">Ações</th>
@@ -339,6 +481,21 @@ export const AdminPanel = ({ onBack }: { onBack: () => void }) => {
                                                             </div>
                                                         </td>
                                                         <td className="p-4">
+                                                            <div className="flex flex-wrap gap-1 max-w-[200px]">
+                                                                {(userGroups[user.id] || []).map(gid => {
+                                                                    const groupName = groups.find(g => g.id === gid)?.name || '...';
+                                                                    return (
+                                                                        <span key={gid} className="px-2 py-0.5 bg-slate-100 text-slate-500 rounded text-[9px] font-bold truncate">
+                                                                            {groupName}
+                                                                        </span>
+                                                                    );
+                                                                })}
+                                                                {(!userGroups[user.id] || userGroups[user.id].length === 0) && (
+                                                                    <span className="text-[10px] text-slate-300 italic">Sem grupos</span>
+                                                                )}
+                                                            </div>
+                                                        </td>
+                                                        <td className="p-4">
                                                             <button
                                                                 onClick={() => toggleUserRole(user.id, user.role)}
                                                                 className={`px-3 py-1 rounded-full text-[10px] font-bold uppercase ${user.role === 'admin' ? 'bg-purple-100 text-purple-700' : 'bg-slate-100 text-slate-600'}`}
@@ -346,6 +503,7 @@ export const AdminPanel = ({ onBack }: { onBack: () => void }) => {
                                                                 {user.role}
                                                             </button>
                                                         </td>
+
                                                         <td className="p-4">
                                                             <button
                                                                 onClick={() => toggleUserStatus(user.id, user.active)}
@@ -582,11 +740,11 @@ export const AdminPanel = ({ onBack }: { onBack: () => void }) => {
                                                     <div className="pt-4 border-t border-slate-200/50 space-y-2">
                                                         <p className="text-[10px] uppercase font-bold text-slate-400 tracking-widest px-1">Base de Conhecimento (Texto)</p>
                                                         <textarea
-                                                            value={editingAgent.description}
-                                                            onChange={e => setEditingAgent({ ...editingAgent, description: e.target.value })}
+                                                            value={editingAgent.knowledge_text || ''}
+                                                            onChange={e => setEditingAgent({ ...editingAgent, knowledge_text: e.target.value })}
                                                             placeholder="Adicione informações, regras ou factos adicionais..."
                                                             rows={4}
-                                                            className="w-full p-3 bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-primary-100 outline-none font-medium transition-all text-xs resize-none"
+                                                            className="w-full p-3 bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-primary-100 outline-none font-medium transition-all text-xs resize-none text-slate-800"
                                                         />
                                                         <p className="text-[9px] text-slate-400 italic">Este texto servirá como conhecimento base para todas as respostas deste agente.</p>
                                                     </div>
@@ -639,6 +797,16 @@ export const AdminPanel = ({ onBack }: { onBack: () => void }) => {
                                                 <h3 className="font-bold text-slate-800 text-xl tracking-tight group-hover:text-primary-600 transition-colors">{agent.name}</h3>
                                                 <p className="text-slate-500 text-sm mt-2 line-clamp-2 leading-relaxed">{agent.description || 'Sem descrição.'}</p>
 
+                                                <div className="flex items-center gap-2 mt-4">
+                                                    <div className="flex flex-wrap gap-1">
+                                                        {(agentGroups[agent.id!] || []).map(gid => (
+                                                            <span key={gid} className="px-2 py-0.5 bg-primary-50 text-primary-600 border border-primary-100 rounded text-[8px] font-bold uppercase tracking-tight">
+                                                                {groups.find(g => g.id === gid)?.name}
+                                                            </span>
+                                                        ))}
+                                                    </div>
+                                                </div>
+
                                                 <div className="flex items-center gap-2 mt-6">
                                                     <span className={`px-2.5 py-1 rounded-lg text-[9px] font-bold uppercase tracking-wider ${agent.visibility === 'public' ? 'bg-blue-50 text-blue-600' : 'bg-amber-50 text-amber-600'}`}>
                                                         {agent.visibility}
@@ -658,6 +826,229 @@ export const AdminPanel = ({ onBack }: { onBack: () => void }) => {
                             </div>
                         </div>
                     )}
+
+                    {activeTab === 'groups' && (
+                        <div className="max-w-6xl mx-auto space-y-6">
+                            <div className="flex items-center justify-between pb-8 border-b border-slate-200/40">
+                                <div>
+                                    <h2 className="text-2xl md:text-3xl font-bold text-slate-800 tracking-tight">Gestão de Grupos</h2>
+                                    <p className="text-slate-500 mt-1">Organize utilizadores e agentes em grupos de trabalho.</p>
+                                </div>
+                                <button
+                                    onClick={() => {
+                                        setEditingGroup({ id: '', name: '', description: '' });
+                                        setGroupMembers([]);
+                                        setGroupAgents([]);
+                                    }}
+                                    className="border border-primary-600/30 text-primary-600 bg-white dark:bg-slate-900 px-6 py-2.5 rounded-2xl font-bold hover:bg-primary-50 transition-all flex items-center gap-2 text-sm shadow-sm"
+                                >
+                                    <FolderPlus size={18} /> Novo Grupo
+                                </button>
+                            </div>
+
+                            {editingGroup && (
+                                <div className="fixed inset-0 bg-slate-950/40 backdrop-blur-md z-50 flex items-center justify-center p-4">
+                                    <form onSubmit={saveGroup} className="bg-white rounded-[2.5rem] w-full max-w-4xl shadow-2xl overflow-hidden animate-in zoom-in duration-300 flex flex-col max-h-[90vh] border border-slate-200/50">
+                                        <div className="p-8 border-b border-slate-100 flex items-center justify-between bg-slate-50/30 shrink-0">
+                                            <h3 className="text-xl font-bold text-slate-800 tracking-tight">{editingGroup.id ? 'Editar Grupo' : 'Novo Grupo'}</h3>
+                                            <button type="button" onClick={() => setEditingGroup(null)} className="p-2 hover:bg-slate-200 rounded-full transition-colors"><X size={20} /></button>
+                                        </div>
+                                        <div className="flex-1 overflow-y-auto p-8 space-y-8 custom-scrollbar">
+                                            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                                                <div className="space-y-4">
+                                                    <div className="space-y-1.5">
+                                                        <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest px-1">Nome do Grupo</label>
+                                                        <input
+                                                            required
+                                                            value={editingGroup.name}
+                                                            onChange={e => setEditingGroup({ ...editingGroup, name: e.target.value })}
+                                                            placeholder="Ex: Departamento Comercial"
+                                                            className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-primary-100 outline-none font-medium transition-all"
+                                                        />
+                                                    </div>
+                                                    <div className="space-y-1.5">
+                                                        <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest px-1">Descrição</label>
+                                                        <textarea
+                                                            value={editingGroup.description}
+                                                            onChange={e => setEditingGroup({ ...editingGroup, description: e.target.value })}
+                                                            placeholder="Breve descrição do grupo..."
+                                                            rows={3}
+                                                            className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-primary-100 outline-none font-medium transition-all resize-none"
+                                                        />
+                                                    </div>
+                                                </div>
+
+                                                <div className="bg-slate-50 p-6 rounded-3xl border border-slate-100">
+                                                    <p className="text-xs font-bold text-slate-800 mb-4 flex items-center gap-2">
+                                                        <Search size={14} className="text-primary-500" /> Pesquisa Rápida
+                                                    </p>
+                                                    <input
+                                                        type="text"
+                                                        value={searchTerm}
+                                                        onChange={e => setSearchTerm(e.target.value)}
+                                                        placeholder="Pesquisar utilizadores ou agentes..."
+                                                        className="w-full p-3 bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-primary-100 outline-none font-medium transition-all text-sm mb-4"
+                                                    />
+                                                    <p className="text-[9px] text-slate-400 leading-relaxed">Utilize o campo de pesquisa abaixo para encontrar rapidamente utilizadores ou agentes para adicionar ao grupo.</p>
+                                                </div>
+                                            </div>
+
+                                            <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                                                {/* Member Selection */}
+                                                <div className="space-y-4">
+                                                    <div className="flex items-center justify-between px-1">
+                                                        <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Utilizadores no Grupo ({groupMembers.length})</label>
+                                                    </div>
+                                                    <div className="bg-slate-50 border border-slate-200 rounded-[1.5rem] overflow-hidden">
+                                                        <div className="max-h-[300px] overflow-y-auto divide-y divide-slate-100">
+                                                            {users.filter(u => !searchTerm || u.name?.toLowerCase().includes(searchTerm.toLowerCase()) || u.id.includes(searchTerm)).map(user => {
+                                                                const isChecked = groupMembers.includes(user.id);
+                                                                return (
+                                                                    <div
+                                                                        key={user.id}
+                                                                        onClick={() => {
+                                                                            if (isChecked) setGroupMembers(prev => prev.filter(id => id !== user.id));
+                                                                            else setGroupMembers(prev => [...prev, user.id]);
+                                                                        }}
+                                                                        className={`p-3 flex items-center justify-between cursor-pointer hover:bg-white transition-colors group ${isChecked ? 'bg-primary-50/30' : ''}`}
+                                                                    >
+                                                                        <div className="flex items-center gap-3">
+                                                                            <div className={`w-8 h-8 rounded-lg flex items-center justify-center font-bold text-xs ${isChecked ? 'bg-primary-600 text-white' : 'bg-slate-200 text-slate-500'}`}>
+                                                                                {user.name?.[0] || 'U'}
+                                                                            </div>
+                                                                            <div>
+                                                                                <div className="text-xs font-bold text-slate-700">{user.name || 'Sem nome'}</div>
+                                                                                <div className="text-[9px] text-slate-400">{user.role}</div>
+                                                                            </div>
+                                                                        </div>
+                                                                        <div className={`w-5 h-5 rounded-full border-2 transition-all flex items-center justify-center ${isChecked ? 'border-primary-600 bg-primary-600' : 'border-slate-300'}`}>
+                                                                            {isChecked && <CheckCircle2 size={12} className="text-white" />}
+                                                                        </div>
+                                                                    </div>
+                                                                );
+                                                            })}
+                                                        </div>
+                                                    </div>
+                                                </div>
+
+                                                {/* Agent Selection */}
+                                                <div className="space-y-4">
+                                                    <div className="flex items-center justify-between px-1">
+                                                        <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Agentes no Grupo ({groupAgents.length})</label>
+                                                    </div>
+                                                    <div className="bg-slate-50 border border-slate-200 rounded-[1.5rem] overflow-hidden">
+                                                        <div className="max-h-[300px] overflow-y-auto divide-y divide-slate-100">
+                                                            {agents.filter(a => !searchTerm || a.name.toLowerCase().includes(searchTerm.toLowerCase())).map(agent => {
+                                                                const isChecked = groupAgents.includes(agent.id!);
+                                                                return (
+                                                                    <div
+                                                                        key={agent.id}
+                                                                        onClick={() => {
+                                                                            if (isChecked) setGroupAgents(prev => prev.filter(id => id !== agent.id));
+                                                                            else setGroupAgents(prev => [...prev, agent.id!]);
+                                                                        }}
+                                                                        className={`p-3 flex items-center justify-between cursor-pointer hover:bg-white transition-colors group ${isChecked ? 'bg-amber-50/30' : ''}`}
+                                                                    >
+                                                                        <div className="flex items-center gap-3">
+                                                                            <div className={`w-8 h-8 rounded-lg flex items-center justify-center font-bold text-xs ${isChecked ? 'bg-amber-500 text-white' : 'bg-slate-200 text-slate-500'}`}>
+                                                                                {agent.name[0]}
+                                                                            </div>
+                                                                            <div>
+                                                                                <div className="text-xs font-bold text-slate-700">{agent.name}</div>
+                                                                                <div className="text-[9px] text-slate-400 truncate max-w-[150px]">{agent.description}</div>
+                                                                            </div>
+                                                                        </div>
+                                                                        <div className={`w-5 h-5 rounded-full border-2 transition-all flex items-center justify-center ${isChecked ? 'border-amber-500 bg-amber-500' : 'border-slate-300'}`}>
+                                                                            {isChecked && <CheckCircle2 size={12} className="text-white" />}
+                                                                        </div>
+                                                                    </div>
+                                                                );
+                                                            })}
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                        <div className="p-6 bg-slate-50 border-t border-slate-100 flex justify-end gap-3 shrink-0">
+                                            <button type="button" onClick={() => setEditingGroup(null)} className="px-6 py-2.5 font-bold text-slate-500 hover:bg-slate-200 rounded-xl transition-all">Cancelar</button>
+                                            <button type="submit" disabled={savingGroup} className="px-8 py-2.5 bg-primary-600 text-white font-bold rounded-xl hover:bg-primary-700 transition-all shadow-lg shadow-primary-100 disabled:opacity-50 flex items-center gap-2">
+                                                {savingGroup ? <Loader2 size={18} className="animate-spin" /> : <CheckCircle2 size={18} />}
+                                                Guardar Grupo
+                                            </button>
+                                        </div>
+                                    </form>
+                                </div>
+                            )}
+
+                            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                                {loadingGroups ? (
+                                    <div className="col-span-full flex flex-col items-center justify-center py-20 text-slate-400">
+                                        <Loader2 className="animate-spin mb-2" />
+                                        <span>A carregar grupos...</span>
+                                    </div>
+                                ) : groups.length === 0 ? (
+                                    <div className="col-span-full text-center py-20 bg-white rounded-3xl border-2 border-dashed border-slate-200">
+                                        <FolderPlus className="mx-auto text-slate-300 mb-4" size={48} />
+                                        <p className="text-slate-500">Nenhum grupo criado. Crie o primeiro!</p>
+                                    </div>
+                                ) : (
+                                    groups.map((group) => (
+                                        <div key={group.id} className="bg-white rounded-[2rem] border border-slate-200/50 shadow-sm overflow-hidden flex flex-col hover:shadow-2xl hover:border-primary-200/50 transition-all group animate-slide-up">
+                                            <div className="p-8 flex-1">
+                                                <div className="flex items-start justify-between mb-6">
+                                                    <div className="w-14 h-14 rounded-2xl bg-slate-100 flex items-center justify-center text-slate-400 font-bold text-2xl shadow-sm group-hover:bg-primary-100 group-hover:text-primary-600 transition-colors">
+                                                        <Users size={32} />
+                                                    </div>
+                                                    <div className="flex items-center gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                                                        <button
+                                                            onClick={() => {
+                                                                setEditingGroup(group);
+                                                                fetchGroupDetails(group.id);
+                                                            }}
+                                                            className="p-2 text-slate-400 hover:text-primary-600 transition-colors bg-slate-50 rounded-xl"
+                                                        >
+                                                            <Settings size={18} />
+                                                        </button>
+                                                        <button
+                                                            onClick={() => deleteGroup(group.id)}
+                                                            className="p-2 text-slate-400 hover:text-red-600 transition-colors bg-slate-50 rounded-xl"
+                                                        >
+                                                            <Trash2 size={18} />
+                                                        </button>
+                                                    </div>
+                                                </div>
+                                                <h3 className="font-bold text-slate-800 text-xl tracking-tight group-hover:text-primary-600 transition-colors">{group.name}</h3>
+                                                <p className="text-slate-500 text-sm mt-2 line-clamp-2 leading-relaxed">{group.description || 'Sem descrição.'}</p>
+
+                                                <div className="mt-6 flex items-center gap-4">
+                                                    <div className="flex flex-col">
+                                                        <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Utilizadores</span>
+                                                        <span className="text-lg font-bold text-slate-700">
+                                                            {Object.values(userGroups).filter(gids => gids.includes(group.id)).length}
+                                                        </span>
+                                                    </div>
+                                                    <div className="w-px h-8 bg-slate-100" />
+                                                    <div className="flex flex-col">
+                                                        <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Agentes</span>
+                                                        <span className="text-lg font-bold text-slate-700">
+                                                            {Object.values(agentGroups).filter(gids => gids.includes(group.id)).length}
+                                                        </span>
+                                                    </div>
+                                                </div>
+
+                                            </div>
+                                            <div className="p-5 bg-slate-50/50 flex items-center justify-between border-t border-slate-100/50">
+                                                <span className="text-[9px] text-slate-400 font-bold uppercase tracking-widest pl-3 flex items-center gap-2">
+                                                    <CheckCircle2 size={10} className="text-green-500" /> Ativo
+                                                </span>
+                                            </div>
+                                        </div>
+                                    ))
+                                )}
+                            </div>
+                        </div>
+                    )}
+
                 </main>
             </div>
         </div>

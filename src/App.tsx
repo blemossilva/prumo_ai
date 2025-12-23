@@ -98,7 +98,7 @@ function App() {
       setSession(session)
       if (session) {
         fetchProfile(session.user.id)
-        fetchAgents()
+        fetchAgents(session.user.id)
         fetchConversations(session.user.id)
       }
       else setLoading(false)
@@ -108,7 +108,7 @@ function App() {
       setSession(session)
       if (session) {
         fetchProfile(session.user.id)
-        fetchAgents()
+        fetchAgents(session.user.id)
         fetchConversations(session.user.id)
       }
       else {
@@ -131,19 +131,65 @@ function App() {
     setLoading(false)
   }
 
-  const fetchAgents = async () => {
-    const { data } = await supabase
-      .from('agents')
-      .select('*')
-      .order('name', { ascending: true })
+  const fetchAgents = async (userIdOverride?: string) => {
+    try {
+      const userId = userIdOverride || session?.user?.id;
+      if (!userId) return;
 
-    if (data) {
-      setAgents(data)
-      if (data.length > 0 && !selectedAgentId) {
-        setSelectedAgentId(data[0].id)
+      // First, get the user's profile to check role
+      const { data: profileData } = await supabase
+        .from('profiles')
+        .select('role')
+        .eq('id', userId)
+        .single();
+
+      let query = supabase.from('agents').select('*');
+
+      if (profileData?.role !== 'admin') {
+        // If not admin, only fetch agents that belong to groups the user is a member of
+        // OR agents that are public
+        const { data: memberGroups } = await supabase
+          .from('user_group_members')
+          .select('group_id')
+          .eq('user_id', userId);
+
+        const groupIds = memberGroups?.map(mg => mg.group_id) || [];
+
+        if (groupIds.length > 0) {
+          const { data: agentIdsData } = await supabase
+            .from('user_group_agents')
+            .select('agent_id')
+            .in('group_id', groupIds);
+
+          const agentIds = agentIdsData?.map(ag => ag.agent_id) || [];
+
+          if (agentIds.length > 0) {
+            // Include agents from groups OR public agents
+            query = query.or(`id.in.(${agentIds.map(id => `"${id}"`).join(',')}),visibility.eq.public`);
+          } else {
+            // No specific agents for groups, only show public
+            query = query.eq('visibility', 'public');
+          }
+        } else {
+          // User belongs to no groups, only show public agents
+          query = query.eq('visibility', 'public');
+        }
       }
+
+      const { data, error } = await query.order('name', { ascending: true });
+
+      if (error) throw error;
+
+      if (data) {
+        setAgents(data);
+        if (data.length > 0 && !selectedAgentId) {
+          setSelectedAgentId(data[0].id);
+        }
+      }
+    } catch (err) {
+      console.error('Error fetching agents:', err);
     }
-  }
+  };
 
   const fetchConversations = async (userId: string) => {
     const { data } = await supabase
@@ -233,7 +279,7 @@ function App() {
           system_prompt: selectedAgent?.system_prompt,
           provider: selectedAgent?.provider,
           model: selectedAgent?.model,
-          agent_id: selectedAgent?.id
+          agent_id: selectedAgentId // Changed from selectedAgent?.id to selectedAgentId
         }
       });
 
@@ -349,11 +395,15 @@ function App() {
           >
             <Menu size={20} />
           </button>
-          <div className="w-8 h-8 bg-primary-600 rounded-xl flex items-center justify-center text-white font-bold shadow-lg shadow-primary-500/10 uppercase">
-            {selectedAgent?.name?.[0] || 'P'}
+          <div className="w-10 h-10 flex items-center justify-center p-1.5 bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-slate-200/50 dark:border-white/5">
+            <img
+              src="/nexio_ai_icone.png"
+              alt="Nexio AI Icon"
+              className="w-full h-full object-contain"
+            />
           </div>
-          <h1 className="text-base md:text-lg font-medium tracking-tight text-slate-700 dark:text-white uppercase truncate max-w-[150px] md:max-w-none">
-            {selectedAgent?.name || 'Prumo AI'}
+          <h1 className="text-base md:text-lg font-bold tracking-tight text-slate-800 dark:text-white truncate max-w-[150px] md:max-w-none">
+            {selectedAgent?.name || 'Nexio AI'}
           </h1>
           {profile?.role === 'admin' && (
             <span className="hidden sm:flex ml-2 px-2 py-0.5 bg-primary-50 dark:bg-primary-900/40 text-primary-600 dark:text-primary-400 text-[9px] font-bold uppercase rounded-md items-center gap-1">
@@ -626,7 +676,7 @@ function App() {
               </div>
               <div className="mt-4 flex flex-col items-center gap-1.5 opacity-40">
                 <p className="text-[9px] text-slate-500 dark:text-slate-400 font-medium text-center leading-relaxed">
-                  O PRUMO AI recomenda a confirmação de dados críticos. Privacidade e segurança são a nossa prioridade.
+                  O NEXIO AI recomenda a confirmação de dados críticos. Privacidade e segurança são a nossa prioridade.
                 </p>
               </div>
             </div>
