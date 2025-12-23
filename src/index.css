@@ -1,0 +1,91 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html {
+    scroll-behavior: smooth;
+  }
+
+  body {
+    @apply bg-white text-slate-900 font-sans antialiased;
+  }
+
+  /* Custom Scrollbar for a premium look */
+  ::-webkit-scrollbar {
+    width: 8px;
+  }
+
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    background: #e2e8f0;
+    border-radius: 10px;
+    border: 2px solid transparent;
+    background-clip: content-box;
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    background: #cbd5e1;
+    background-clip: content-box;
+  }
+}
+
+.glass {
+  @apply bg-white/70 backdrop-blur-md border border-white/20;
+}
+
+/* Updated Chat Bubble Styles for Claude/ChatGPT Look */
+.chat-bubble-ai .prose {
+  @apply text-slate-800 font-normal;
+}
+
+.prose h1,
+.prose h2,
+.prose h3 {
+  @apply text-slate-900 font-semibold mb-4 mt-6;
+}
+
+.prose p {
+  @apply mb-4 last:mb-0 leading-relaxed text-slate-700;
+}
+
+.prose ul,
+.prose ol {
+  @apply mb-4 ml-6 list-outside space-y-2;
+}
+
+.prose li>p {
+  @apply mb-0;
+}
+
+.prose strong {
+  @apply font-bold text-slate-950;
+}
+
+.prose code {
+  @apply bg-slate-100 text-slate-900 px-1 py-0.5 rounded font-mono text-[13px];
+}
+
+.prose pre {
+  @apply bg-slate-950 text-slate-100 p-5 rounded-2xl my-6 overflow-x-auto font-mono text-[13px] shadow-xl;
+}
+
+.prose blockquote {
+  @apply border-l-4 border-primary-500 pl-4 italic text-slate-600 my-6 bg-primary-50/30 py-2 rounded-r-lg;
+}
+
+.prose table {
+  @apply w-full border-collapse my-6 overflow-hidden rounded-xl border border-slate-200;
+}
+
+.prose th,
+.prose td {
+  @apply border border-slate-200 p-3 text-left;
+}
+
+.prose th {
+  @apply bg-slate-50 font-bold text-slate-900;
+}
