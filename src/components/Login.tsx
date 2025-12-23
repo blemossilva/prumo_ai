@@ -39,11 +39,11 @@ export const Login = () => {
     return (
         <div className="min-h-screen bg-slate-50 flex items-center justify-center p-4">
             <div className="max-w-md w-full bg-white rounded-3xl shadow-xl p-8 border border-slate-100">
-                <div className="flex flex-col items-center mb-8">
-                    <div className="w-16 h-16 bg-primary-600 rounded-2xl flex items-center justify-center text-white mb-4 shadow-lg shadow-primary-200">
-                        <LogIn size={32} />
+                <div className="flex flex-col items-center mb-10">
+                    <div className="w-20 h-20 bg-primary-600 rounded-[2rem] flex items-center justify-center text-white mb-6 shadow-xl shadow-primary-500/10">
+                        <LogIn size={36} />
                     </div>
-                    <h1 className="text-2xl font-bold text-slate-800">Agente de RH</h1>
+                    <h1 className="text-3xl font-bold text-slate-800 tracking-tight">Prumo AI</h1>
                     <p className="text-slate-500 mt-2 text-center">
                         {isSignUp ? 'Crie sua conta corporativa' : 'Faça login para aceder ao assistente'}
                     </p>

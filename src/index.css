@@ -3,17 +3,62 @@
 @tailwind utilities;
 
 @layer base {
+  :root {
+    --background: 247 248 253;
+    /* #F7F8FD - Cloud */
+    --foreground: 30 41 59;
+    /* slate-800 */
+    --card: 255 255 255;
+    --card-foreground: 30 41 59;
+    --primary: 79 70 229;
+    /* #4F46E5 - Soft Indigo */
+    --primary-foreground: 255 255 255;
+    --secondary: 241 245 249;
+    --secondary-foreground: 30 41 59;
+    --muted: 241 245 249;
+    --muted-foreground: 100 116 139;
+    --border: 226 232 240;
+    --input: 226 232 240;
+    --ring: 79 70 229;
+    --sidebar: 243 245 248;
+    /* #F3F5F8 - Light Grey Sidebar */
+    --ai-bubble: 241 243 246;
+    /* #F1F3F6 - AI Card Background */
+  }
+
+  .dark {
+    --background: 2 6 23;
+    --foreground: 241 245 249;
+    --card: 15 23 42;
+    --card-foreground: 241 245 249;
+    --primary: 99 102 241;
+    /* indigo-500 */
+    --primary-foreground: 255 255 255;
+    --secondary: 30 41 59;
+    --secondary-foreground: 241 245 249;
+    --muted: 30 41 59;
+    --muted-foreground: 148 163 184;
+    --border: 30 41 59;
+    --input: 30 41 59;
+    --ring: 99 102 241;
+    --sidebar: 2 6 23;
+    --ai-bubble: 30 41 59;
+  }
+
   html {
     scroll-behavior: smooth;
   }
 
   body {
-    @apply bg-white text-slate-900 font-sans antialiased;
+    background-color: rgb(var(--background));
+    color: rgb(var(--foreground));
+    @apply font-sans antialiased transition-colors duration-500 selection:bg-primary-500/30 selection:text-white;
+    line-height: 1.6;
   }
 
-  /* Custom Scrollbar for a premium look */
+  /* Custom Scrollbar */
   ::-webkit-scrollbar {
-    width: 8px;
+    width: 6px;
   }
 
   ::-webkit-scrollbar-track {
@@ -21,71 +66,89 @@
   }
 
   ::-webkit-scrollbar-thumb {
-    background: #e2e8f0;
+    background: rgb(var(--muted-foreground) / 0.15);
     border-radius: 10px;
-    border: 2px solid transparent;
-    background-clip: content-box;
   }
 
   ::-webkit-scrollbar-thumb:hover {
-    background: #cbd5e1;
-    background-clip: content-box;
+    background: rgb(var(--muted-foreground) / 0.3);
   }
 }
 
 .glass {
-  @apply bg-white/70 backdrop-blur-md border border-white/20;
+  @apply backdrop-blur-xl bg-white/70 dark:bg-slate-900/70 border-t border-slate-200/50 dark:border-white/5 shadow-2xl;
 }
 
-/* Updated Chat Bubble Styles for Claude/ChatGPT Look */
+/* Premium Chat Bubble Styles */
+.chat-bubble-ai {
+  background-color: rgb(var(--ai-bubble));
+  @apply rounded-3xl p-6 shadow-sm border border-slate-200/20;
+}
+
 .chat-bubble-ai .prose {
-  @apply text-slate-800 font-normal;
+  color: rgb(var(--foreground) / 0.95);
+  @apply font-normal max-w-none text-[15px] leading-relaxed;
 }
 
 .prose h1,
 .prose h2,
 .prose h3 {
-  @apply text-slate-900 font-semibold mb-4 mt-6;
+  color: rgb(var(--foreground));
+  @apply font-semibold mb-4 mt-8 tracking-tight;
 }
 
 .prose p {
-  @apply mb-4 last:mb-0 leading-relaxed text-slate-700;
+  @apply mb-4 last:mb-0 leading-relaxed opacity-95;
 }
 
 .prose ul,
 .prose ol {
-  @apply mb-4 ml-6 list-outside space-y-2;
-}
-
-.prose li>p {
-  @apply mb-0;
+  @apply mb-4 ml-6 list-outside space-y-2.5;
 }
 
 .prose strong {
-  @apply font-bold text-slate-950;
+  color: rgb(var(--primary));
+  @apply font-medium;
+  /* Using Medium instead of Bold */
 }
 
 .prose code {
-  @apply bg-slate-100 text-slate-900 px-1 py-0.5 rounded font-mono text-[13px];
+  background-color: rgb(var(--muted));
+  color: rgb(var(--foreground));
+  @apply px-1.5 py-0.5 rounded-md font-mono text-[13px] border border-white/5;
 }
 
 .prose pre {
-  @apply bg-slate-950 text-slate-100 p-5 rounded-2xl my-6 overflow-x-auto font-mono text-[13px] shadow-xl;
+  @apply bg-slate-950 text-slate-200 p-6 rounded-2xl my-6 overflow-x-auto font-mono text-[13px] shadow-xl border border-white/5;
 }
 
 .prose blockquote {
-  @apply border-l-4 border-primary-500 pl-4 italic text-slate-600 my-6 bg-primary-50/30 py-2 rounded-r-lg;
+  @apply border-l-4 border-primary-500/30 pl-5 italic text-slate-600 dark:text-slate-400 my-6 bg-primary-500/5 py-3 rounded-r-2xl;
 }
 
 .prose table {
-  @apply w-full border-collapse my-6 overflow-hidden rounded-xl border border-slate-200;
+  @apply w-full border-collapse my-6 overflow-hidden rounded-xl border border-slate-200/50 dark:border-white/5;
 }
 
 .prose th,
 .prose td {
-  @apply border border-slate-200 p-3 text-left;
+  @apply border border-slate-200/50 dark:border-white/5 p-4 text-left;
 }
 
 .prose th {
-  @apply bg-slate-50 font-bold text-slate-900;
+  @apply bg-slate-50 dark:bg-slate-900 font-bold text-[13px] uppercase tracking-wider;
+}
+
+/* Utils */
+.sidebar-bg {
+  background-color: rgb(var(--sidebar));
+  @apply border-r border-slate-200/40 dark:border-white/[0.04] transition-colors duration-500;
+}
+
+.card-bg {
+  background-color: rgb(var(--card));
+}
+
+.border-color {
+  @apply border-slate-200/60 dark:border-white/[0.04];
 }

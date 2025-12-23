@@ -2,18 +2,16 @@ import React, { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
 import {
     FileText,
-    Upload,
     Trash2,
     Settings,
     Users,
-    Database,
     CheckCircle2,
-    Clock,
-    AlertCircle,
     Loader2,
-    RefreshCw,
     Shield,
-    ArrowLeft
+    ArrowLeft,
+    LayoutDashboard,
+    Plus,
+    X
 } from 'lucide-react';
 
 interface Document {
@@ -21,36 +19,100 @@ interface Document {
     filename: string;
     status: 'uploaded' | 'processing' | 'ready' | 'error';
     created_at: string;
-    storage_path: string; // Added storage_path to interface
+    storage_path: string;
+    agent_id?: string | null;
+}
+
+interface Agent {
+    id?: string;
+    name: string;
+    description: string;
+    system_prompt: string;
+    status: 'live' | 'disabled';
+    visibility: 'public' | 'private';
+    provider: string;
+    model: string;
+    suggested_prompts?: string[] | null;
 }
 
 export const AdminPanel = ({ onBack }: { onBack: () => void }) => {
-    const [activeTab, setActiveTab] = useState<'kb' | 'ai' | 'users'>('kb');
+    const [activeTab, setActiveTab] = useState<'users' | 'agents'>('agents');
     const [documents, setDocuments] = useState<Document[]>([]);
     const [uploading, setUploading] = useState(false);
     const [loading, setLoading] = useState(true);
-    const [aiSettings, setAiSettings] = useState({
-        provider: 'openai',
-        model: 'gpt-4o-mini',
-        system_prompt: ''
-    });
-    const [savingSettings, setSavingSettings] = useState(false);
     const [availableModels, setAvailableModels] = useState<{ id: string, name: string }[]>([]);
     const [fetchingModels, setFetchingModels] = useState(false);
 
     const [users, setUsers] = useState<any[]>([]);
     const [loadingUsers, setLoadingUsers] = useState(false);
 
+    const [agents, setAgents] = useState<Agent[]>([]);
+    const [loadingAgents, setLoadingAgents] = useState(false);
+    const [editingAgent, setEditingAgent] = useState<Agent | null>(null);
+    const [savingAgent, setSavingAgent] = useState(false);
+
     useEffect(() => {
         fetchDocuments();
-        fetchSettings();
     }, []);
 
     useEffect(() => {
+        if (activeTab === 'agents') {
+            fetchAgents();
+            fetchDocuments();
+        }
         if (activeTab === 'users') {
             fetchUsers();
         }
     }, [activeTab]);
+
+    const fetchAgents = async () => {
+        setLoadingAgents(true);
+        const { data } = await supabase
+            .from('agents')
+            .select('*')
+            .order('created_at', { ascending: false });
+        if (data) setAgents(data);
+        setLoadingAgents(false);
+    };
+
+    const saveAgent = async (e: React.FormEvent) => {
+        e.preventDefault();
+        if (!editingAgent) return;
+        setSavingAgent(true);
+
+        try {
+            console.log('A guardar agente...', editingAgent);
+            const { data, error } = await supabase
+                .from('agents')
+                .upsert({
+                    ...editingAgent,
+                    updated_at: new Date().toISOString()
+                })
+                .select()
+                .single();
+
+            if (error) {
+                console.error('Erro Supabase:', error);
+                alert(`Erro ao guardar: ${error.message}`);
+            } else {
+                if (data) setEditingAgent(data);
+                fetchAgents();
+                alert('Agente guardado! Já pode adicionar a base de conhecimento.');
+            }
+        } catch (err: any) {
+            console.error('Erro fatal ao guardar:', err);
+            alert(`Erro inesperado: ${err.message || 'Erro desconhecido'}`);
+        } finally {
+            setSavingAgent(false);
+        }
+    };
+
+    const deleteAgent = async (id: string) => {
+        if (!confirm('Eliminar este agente?')) return;
+        const { error } = await supabase.from('agents').delete().eq('id', id);
+        if (error) alert('Erro ao eliminar agente');
+        else fetchAgents();
+    };
 
     const fetchUsers = async () => {
         setLoadingUsers(true);
@@ -102,18 +164,10 @@ export const AdminPanel = ({ onBack }: { onBack: () => void }) => {
     };
 
     useEffect(() => {
-        if (activeTab === 'ai') {
-            fetchModels(aiSettings.provider);
+        if (editingAgent?.provider) {
+            fetchModels(editingAgent.provider);
         }
-    }, [aiSettings.provider, activeTab]);
-
-    const fetchSettings = async () => {
-        const { data } = await supabase.from('llm_settings').select('*').single();
-        if (data) {
-            setAiSettings(data);
-            fetchModels(data.provider);
-        }
-    };
+    }, [editingAgent?.provider]);
 
     const fetchModels = async (provider: string) => {
         setFetchingModels(true);
@@ -129,53 +183,45 @@ export const AdminPanel = ({ onBack }: { onBack: () => void }) => {
         }
     };
 
-    const saveSettings = async () => {
-        setSavingSettings(true);
-        const { error } = await supabase
-            .from('llm_settings')
-            .upsert({
-                id: (aiSettings as any).id, // Keep ID if exists
-                ...aiSettings,
-                updated_at: new Date().toISOString()
-            });
 
-        if (error) alert('Erro ao guardar definições');
-        else alert('Definições guardadas com sucesso!');
-        setSavingSettings(false);
-    };
 
-    const fetchDocuments = async () => {
+
+    const fetchDocuments = async (agentId?: string) => {
         setLoading(true);
-        const { data } = await supabase
+        let query = supabase
             .from('documents')
             .select('*')
             .order('created_at', { ascending: false });
 
+        if (agentId) {
+            query = query.eq('agent_id', agentId);
+        }
+
+        const { data } = await query;
         if (data) setDocuments(data as Document[]);
         setLoading(false);
     };
 
-    const triggerIngest = async (docId: string) => {
+    const triggerIngest = async (docId: string, agentId?: string) => {
         try {
             await supabase.functions.invoke('ingest', {
                 body: { document_id: docId }
             });
-            fetchDocuments();
+            fetchDocuments(agentId);
         } catch (err) {
             console.error('Erro ao processar:', err);
         }
     };
 
-    const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>, agentId?: string) => {
         const file = e.target.files?.[0];
         if (!file) return;
 
         setUploading(true);
         try {
-            // 1. Upload to Storage
             const fileExt = file.name.split('.').pop();
             const fileName = `${Math.random()}.${fileExt}`;
-            const filePath = `hr_kb/${fileName}`;
+            const filePath = `knowledge/${fileName}`;
 
             const { error: uploadError } = await supabase.storage
                 .from('hr_kb')
@@ -183,31 +229,26 @@ export const AdminPanel = ({ onBack }: { onBack: () => void }) => {
 
             if (uploadError) throw uploadError;
 
-            // 2. Insert record in documents table
-            const { error: dbError } = await supabase
+            const { data: docRecord, error: dbError } = await supabase
                 .from('documents')
                 .insert({
                     filename: file.name,
                     storage_path: filePath,
-                    status: 'uploaded'
-                });
+                    status: 'uploaded',
+                    agent_id: agentId || null
+                })
+                .select()
+                .single();
 
             if (dbError) throw dbError;
 
-            // 3. Trigger Ingestion (Process PDF to Vectors)
-            const { data: docData } = await supabase
-                .from('documents')
-                .select('id')
-                .eq('storage_path', filePath)
-                .single();
-
-            if (docData) {
+            if (docRecord) {
                 await supabase.functions.invoke('ingest', {
-                    body: { document_id: docData.id }
+                    body: { document_id: docRecord.id }
                 });
             }
 
-            fetchDocuments();
+            fetchDocuments(agentId);
         } catch (error: any) {
             alert(error.message || 'Erro ao carregar ficheiro');
         } finally {
@@ -228,8 +269,8 @@ export const AdminPanel = ({ onBack }: { onBack: () => void }) => {
     };
 
     return (
-        <div className="min-h-screen bg-slate-50 flex flex-col animate-in fade-in duration-500">
-            <header className="h-16 bg-white border-b border-slate-200 flex items-center px-6 justify-between sticky top-0 z-40">
+        <div className="h-screen bg-[rgb(var(--background))] flex flex-col overflow-hidden transition-colors duration-300">
+            <header className="h-16 glass sticky top-0 z-50 flex items-center px-4 md:px-6 justify-between border-b border-color">
                 <div className="flex items-center gap-4">
                     <button
                         onClick={onBack}
@@ -237,197 +278,41 @@ export const AdminPanel = ({ onBack }: { onBack: () => void }) => {
                     >
                         <ArrowLeft size={20} />
                     </button>
-                    <div className="flex items-center gap-2">
-                        <Shield className="text-accent-600" size={24} />
-                        <h1 className="text-xl font-bold text-slate-800 tracking-tight">Painel de Administração</h1>
+                    <div className="flex items-center gap-3">
+                        <Shield className="text-primary-600" size={20} />
+                        <h1 className="text-base md:text-lg font-medium tracking-tight text-slate-700 dark:text-white uppercase truncate">Painel de Administração</h1>
                     </div>
                 </div>
             </header>
 
             <div className="flex-1 flex overflow-hidden">
-                {/* Admin Navigation */}
-                <nav className="w-64 border-r border-slate-200 bg-white p-4 flex flex-col gap-2">
+                <nav className="w-80 sidebar-bg border-r border-slate-200/40 p-4 flex flex-col gap-2">
                     <button
-                        onClick={() => setActiveTab('kb')}
-                        className={`flex items-center gap-3 p-3 rounded-xl transition-all font-medium ${activeTab === 'kb' ? 'bg-primary-50 text-primary-700 shadow-sm' : 'text-slate-600 hover:bg-slate-50'}`}
+                        onClick={() => setActiveTab('agents')}
+                        className={`flex items-center gap-3 p-3 text-xs rounded-xl transition-all font-semibold ${activeTab === 'agents' ? 'bg-primary-500/10 text-primary-700 dark:text-primary-400' : 'text-slate-600 dark:text-slate-400 hover:bg-slate-200/40'}`}
                     >
-                        <Database size={20} /> Base de Conhecimento
-                    </button>
-                    <button
-                        onClick={() => setActiveTab('ai')}
-                        className={`flex items-center gap-3 p-3 rounded-xl transition-all font-medium ${activeTab === 'ai' ? 'bg-primary-50 text-primary-700 shadow-sm' : 'text-slate-600 hover:bg-slate-50'}`}
-                    >
-                        <Settings size={20} /> Configurações de IA
+                        <LayoutDashboard size={18} /> Gestão de Agentes
                     </button>
                     <button
                         onClick={() => setActiveTab('users')}
-                        className={`flex items-center gap-3 p-3 rounded-xl transition-all font-medium ${activeTab === 'users' ? 'bg-primary-50 text-primary-700 shadow-sm' : 'text-slate-600 hover:bg-slate-50'}`}
+                        className={`flex items-center gap-3 p-3 text-xs rounded-xl transition-all font-semibold ${activeTab === 'users' ? 'bg-primary-500/10 text-primary-700 dark:text-primary-400' : 'text-slate-600 dark:text-slate-400 hover:bg-slate-200/40'}`}
                     >
-                        <Users size={20} /> Gestão de Utilizadores
+                        <Users size={18} /> Gestão de Utilizadores
                     </button>
                 </nav>
 
                 {/* Admin Content */}
                 <main className="flex-1 overflow-y-auto p-8">
-                    {activeTab === 'kb' && (
-                        <div className="max-w-4xl mx-auto space-y-6">
-                            <div className="flex items-center justify-between pb-6 border-b border-slate-200">
-                                <div>
-                                    <h2 className="text-2xl font-bold text-slate-800">Manuais e PDFs</h2>
-                                    <p className="text-slate-500">Gira os documentos que alimentam o cérebro da IA.</p>
-                                </div>
-                                <label className="cursor-pointer bg-primary-600 text-white px-5 py-2.5 rounded-xl font-bold hover:bg-primary-700 transition-all shadow-lg shadow-primary-100 flex items-center gap-2">
-                                    <Upload size={18} /> Carregar PDF
-                                    <input type="file" className="hidden" accept=".pdf" onChange={handleFileUpload} disabled={uploading} />
-                                </label>
-                            </div>
-
-                            {uploading && (
-                                <div className="p-4 bg-primary-50 border border-primary-100 rounded-2xl flex items-center gap-3 animate-pulse">
-                                    <Loader2 className="animate-spin text-primary-600" size={20} />
-                                    <span className="text-sm font-medium text-primary-700">A carregar e processar documento...</span>
-                                </div>
-                            )}
-
-                            <div className="grid gap-3">
-                                {loading ? (
-                                    <div className="flex flex-col items-center justify-center py-12 text-slate-400">
-                                        <Loader2 className="animate-spin mb-2" />
-                                        <span>A carregar documentos...</span>
-                                    </div>
-                                ) : documents.length === 0 ? (
-                                    <div className="text-center py-16 bg-white rounded-3xl border-2 border-dashed border-slate-200">
-                                        <FileText className="mx-auto text-slate-300 mb-4" size={48} />
-                                        <p className="text-slate-500">Nenhum documento encontrado. Carregue o primeiro PDF corporativo.</p>
-                                    </div>
-                                ) : (
-                                    documents.map((doc) => (
-                                        <div key={doc.id} className="bg-white p-4 rounded-2xl border border-slate-100 flex items-center justify-between hover:shadow-md transition-all group">
-                                            <div className="flex items-center gap-4">
-                                                <div className="w-12 h-12 bg-slate-50 rounded-xl flex items-center justify-center text-slate-400 group-hover:bg-primary-50 group-hover:text-primary-500 transition-colors">
-                                                    <FileText size={24} />
-                                                </div>
-                                                <div>
-                                                    <h3 className="font-bold text-slate-800">{doc.filename}</h3>
-                                                    <div className="flex items-center gap-3 mt-1">
-                                                        <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">{new Date(doc.created_at).toLocaleDateString()}</span>
-                                                        <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase flex items-center gap-1 ${doc.status === 'ready' ? 'bg-green-100 text-green-700' :
-                                                            doc.status === 'processing' ? 'bg-amber-100 text-amber-700' :
-                                                                doc.status === 'error' ? 'bg-red-100 text-red-700' : 'bg-slate-100 text-slate-600'
-                                                            }`}>
-                                                            {doc.status === 'ready' && <CheckCircle2 size={10} />}
-                                                            {doc.status === 'processing' && <RefreshCw size={10} className="animate-spin" />}
-                                                            {doc.status === 'error' && <AlertCircle size={10} />}
-                                                            {doc.status}
-                                                        </span>
-                                                    </div>
-                                                </div>
-                                            </div>
-                                            <div className="flex items-center gap-1">
-                                                <button
-                                                    onClick={() => deleteDocument(doc.id, doc.storage_path)}
-                                                    className="p-2 text-slate-400 hover:text-red-500 transition-colors"
-                                                    title="Eliminar"
-                                                >
-                                                    <Trash2 size={20} />
-                                                </button>
-                                                {doc.status === 'uploaded' && (
-                                                    <button
-                                                        onClick={() => triggerIngest(doc.id)}
-                                                        className="p-2 text-primary-500 hover:text-primary-700 transition-colors"
-                                                        title="Processar Agora"
-                                                    >
-                                                        <RefreshCw size={20} />
-                                                    </button>
-                                                )}
-                                            </div>
-                                        </div>
-                                    ))
-                                )}
-                            </div>
-                        </div>
-                    )}
-
-                    {activeTab === 'ai' && (
-                        <div className="max-w-2xl mx-auto space-y-8 py-4">
-                            <div className="pb-6 border-b border-slate-200 text-center">
-                                <Settings className="mx-auto text-primary-600 mb-4" size={48} />
-                                <h2 className="text-2xl font-bold text-slate-800">Definições da IA</h2>
-                                <p className="text-slate-500">Escolha o motor e configure o comportamento do assistente.</p>
-                            </div>
-
-                            <div className="bg-white p-8 rounded-3xl border border-slate-100 shadow-sm space-y-6">
-                                <div className="space-y-4">
-                                    <label className="block text-sm font-bold text-slate-700 uppercase tracking-wider">Fornecedor de IA</label>
-                                    <div className="grid grid-cols-2 gap-4">
-                                        <button
-                                            onClick={() => setAiSettings({ ...aiSettings, provider: 'openai', model: 'gpt-4o-mini' })}
-                                            className={`p-4 rounded-2xl border-2 transition-all flex flex-col items-center gap-2 ${aiSettings.provider === 'openai' ? 'border-primary-600 bg-primary-50 text-primary-700' : 'border-slate-100 grayscale hover:grayscale-0'}`}
-                                        >
-                                            <span className="font-bold text-lg">OpenAI</span>
-                                            <span className="text-[10px] opacity-70">GPT-4o, GPT-3.5</span>
-                                        </button>
-                                        <button
-                                            onClick={() => setAiSettings({ ...aiSettings, provider: 'gemini', model: 'gemini-1.5-flash' })}
-                                            className={`p-4 rounded-2xl border-2 transition-all flex flex-col items-center gap-2 ${aiSettings.provider === 'gemini' ? 'border-primary-600 bg-primary-50 text-primary-700' : 'border-slate-100 grayscale hover:grayscale-0'}`}
-                                        >
-                                            <span className="font-bold text-lg">Gemini</span>
-                                            <span className="text-[10px] opacity-70">Google 1.5 Pro/Flash</span>
-                                        </button>
-                                    </div>
-                                </div>
-
-                                <div className="space-y-2">
-                                    <label className="block text-sm font-bold text-slate-700 uppercase tracking-wider flex items-center gap-2">
-                                        Modelo
-                                        {fetchingModels && <Loader2 size={12} className="animate-spin text-primary-500" />}
-                                    </label>
-                                    <select
-                                        value={aiSettings.model}
-                                        onChange={(e) => setAiSettings({ ...aiSettings, model: e.target.value })}
-                                        disabled={fetchingModels}
-                                        className="w-full p-3 rounded-xl border border-slate-200 focus:ring-2 focus:ring-primary-100 outline-none font-medium text-slate-700 disabled:opacity-50"
-                                    >
-                                        <option value="">Selecione um modelo...</option>
-                                        {availableModels.map(m => (
-                                            <option key={m.id} value={m.id}>{m.name}</option>
-                                        ))}
-                                    </select>
-                                </div>
-
-                                <div className="space-y-2">
-                                    <label className="block text-sm font-bold text-slate-700 uppercase tracking-wider">System Prompt</label>
-                                    <textarea
-                                        value={aiSettings.system_prompt}
-                                        onChange={(e) => setAiSettings({ ...aiSettings, system_prompt: e.target.value })}
-                                        placeholder="Ex: És um assistente de RH útil..."
-                                        rows={5}
-                                        className="w-full p-4 rounded-xl border border-slate-200 focus:ring-2 focus:ring-primary-100 outline-none font-medium text-slate-700 resize-none text-sm"
-                                    />
-                                    <p className="text-[10px] text-slate-400">Este prompt define a personalidade e as regras do Agente.</p>
-                                </div>
-
-                                <button
-                                    onClick={saveSettings}
-                                    disabled={savingSettings}
-                                    className="w-full py-4 bg-primary-600 text-white rounded-2xl font-bold hover:bg-primary-700 transition-all shadow-lg shadow-primary-100 disabled:opacity-50 flex items-center justify-center gap-2"
-                                >
-                                    {savingSettings ? <Loader2 className="animate-spin" size={20} /> : <CheckCircle2 size={20} />}
-                                    Guardar Configurações
-                                </button>
-                            </div>
-                        </div>
-                    )}
 
                     {activeTab === 'users' && (
                         <div className="max-w-4xl mx-auto space-y-6">
-                            <div className="flex items-center justify-between pb-6 border-b border-slate-200">
+                            <div className="flex items-center justify-between pb-8 border-b border-slate-200/40">
                                 <div>
-                                    <h2 className="text-2xl font-bold text-slate-800">Gestão de Utilizadores</h2>
-                                    <p className="text-slate-500">Controle permissões e acessos dos colaboradores.</p>
+                                    <h2 className="text-2xl md:text-3xl font-bold text-slate-800 tracking-tight">Gestão de Utilizadores</h2>
+                                    <p className="text-slate-500 mt-1">Controle permissões e acessos dos colaboradores.</p>
                                 </div>
-                                <div className="text-sm font-medium text-slate-400">
-                                    {users.length} utilizadores registados
+                                <div className="text-[10px] uppercase font-bold text-slate-400 tracking-widest px-4 py-1.5 bg-slate-100 rounded-lg">
+                                    {users.length} Utilizadores
                                 </div>
                             </div>
 
@@ -453,12 +338,12 @@ export const AdminPanel = ({ onBack }: { onBack: () => void }) => {
                                                     <tr key={user.id} className="border-b border-slate-50 hover:bg-slate-50 transition-colors">
                                                         <td className="p-4">
                                                             <div className="flex items-center gap-3">
-                                                                <div className="w-10 h-10 bg-primary-100 rounded-full flex items-center justify-center text-primary-700 font-bold">
+                                                                <div className="w-10 h-10 bg-primary-100 rounded-xl flex items-center justify-center text-primary-700 font-bold shadow-sm">
                                                                     {user.name?.[0] || user.id[0]}
                                                                 </div>
                                                                 <div>
-                                                                    <div className="font-bold text-slate-800">{user.name || 'Sem nome'}</div>
-                                                                    <div className="text-[10px] text-slate-400 font-mono uppercase">{user.id.substring(0, 8)}...</div>
+                                                                    <div className="font-bold text-slate-800 text-sm">{user.name || 'Sem nome'}</div>
+                                                                    <div className="text-[9px] text-slate-400 font-mono uppercase tracking-tight">{user.id.substring(0, 12)}</div>
                                                                 </div>
                                                             </div>
                                                         </td>
@@ -494,6 +379,290 @@ export const AdminPanel = ({ onBack }: { onBack: () => void }) => {
                                             </tbody>
                                         </table>
                                     </div>
+                                )}
+                            </div>
+                        </div>
+                    )}
+                    {activeTab === 'agents' && (
+                        <div className="max-w-5xl mx-auto space-y-6">
+                            <div className="flex items-center justify-between pb-8 border-b border-slate-200/40">
+                                <div>
+                                    <h2 className="text-2xl md:text-3xl font-bold text-slate-800 tracking-tight">Multi-Agentes</h2>
+                                    <p className="text-slate-500 mt-1">Crie e configure as personas da sua IA.</p>
+                                </div>
+                                <button
+                                    onClick={() => setEditingAgent({
+                                        name: '',
+                                        description: '',
+                                        system_prompt: '',
+                                        status: 'live',
+                                        visibility: 'public',
+                                        provider: 'openai',
+                                        model: 'gpt-4o-mini',
+                                        suggested_prompts: ['']
+                                    })}
+                                    className="border border-primary-600/30 text-primary-600 bg-white dark:bg-slate-900 px-6 py-2.5 rounded-2xl font-bold hover:bg-primary-50 transition-all flex items-center gap-2 text-sm shadow-sm"
+                                >
+                                    <Plus size={18} /> Novo Agente
+                                </button>
+                            </div>
+
+                            {editingAgent && (
+                                <div className="fixed inset-0 bg-slate-950/40 backdrop-blur-md z-50 flex items-center justify-center p-4">
+                                    <form onSubmit={saveAgent} className="bg-white rounded-[2.5rem] w-full max-w-2xl shadow-2xl overflow-hidden animate-in zoom-in duration-300 flex flex-col max-h-[90vh] border border-slate-200/50">
+                                        <div className="p-8 border-b border-slate-100 flex items-center justify-between bg-slate-50/30 shrink-0">
+                                            <h3 className="text-xl font-bold text-slate-800 tracking-tight">{editingAgent.id ? 'Editar Agente' : 'Novo Agente'}</h3>
+                                            <button type="button" onClick={() => setEditingAgent(null)} className="p-2 hover:bg-slate-200 rounded-full transition-colors"><X size={20} /></button>
+                                        </div>
+                                        <div className="p-8 space-y-6 overflow-y-auto custom-scrollbar">
+                                            <div className="grid grid-cols-2 gap-4">
+                                                <div className="space-y-1.5">
+                                                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest px-1">Nome do Agente</label>
+                                                    <input
+                                                        required
+                                                        value={editingAgent.name || ''}
+                                                        onChange={e => setEditingAgent({ ...editingAgent, name: e.target.value })}
+                                                        placeholder="Ex: Agente de Vendas"
+                                                        className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-primary-100 outline-none font-medium transition-all text-slate-800"
+                                                    />
+                                                </div>
+                                                <div className="space-y-1.5">
+                                                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest px-1">Visibilidade</label>
+                                                    <select
+                                                        value={editingAgent.visibility || 'public'}
+                                                        onChange={e => setEditingAgent({ ...editingAgent, visibility: e.target.value as any })}
+                                                        className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-primary-100 outline-none font-medium transition-all text-slate-800"
+                                                    >
+                                                        <option value="public">Público (Todos)</option>
+                                                        <option value="private">Privado (Apenas Admin)</option>
+                                                    </select>
+                                                </div>
+                                            </div>
+                                            <div className="space-y-1.5">
+                                                <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest px-1">Descrição Curta</label>
+                                                <input
+                                                    value={editingAgent.description || ''}
+                                                    onChange={e => setEditingAgent({ ...editingAgent, description: e.target.value })}
+                                                    placeholder="Breve resumo da função..."
+                                                    className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-primary-100 outline-none font-medium transition-all text-slate-800"
+                                                />
+                                            </div>
+
+                                            {/* AI Configuration Section */}
+                                            <div className="bg-slate-50 p-5 rounded-2xl border border-slate-100 space-y-4">
+                                                <p className="text-[10px] uppercase font-bold text-slate-400 tracking-widest px-1">Configuração de IA</p>
+                                                <div className="grid grid-cols-2 gap-4">
+                                                    <div className="space-y-1.5">
+                                                        <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest px-1">Fornecedor</label>
+                                                        <select
+                                                            value={editingAgent.provider}
+                                                            onChange={e => setEditingAgent({ ...editingAgent, provider: e.target.value, model: '' })}
+                                                            className="w-full p-2.5 bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-primary-100 outline-none font-medium transition-all text-sm"
+                                                        >
+                                                            <option value="openai">OpenAI</option>
+                                                            <option value="gemini">Gemini</option>
+                                                        </select>
+                                                    </div>
+                                                    <div className="space-y-1.5">
+                                                        <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest px-1 flex items-center gap-2">
+                                                            Modelo
+                                                            {fetchingModels && <Loader2 size={10} className="animate-spin text-primary-500" />}
+                                                        </label>
+                                                        <select
+                                                            value={editingAgent.model}
+                                                            onChange={e => setEditingAgent({ ...editingAgent, model: e.target.value })}
+                                                            className="w-full p-2.5 bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-primary-100 outline-none font-medium transition-all text-sm h-[42px]"
+                                                        >
+                                                            <option value="">Selecione...</option>
+                                                            {availableModels.map(m => (
+                                                                <option key={m.id} value={m.id}>{m.name}</option>
+                                                            ))}
+                                                        </select>
+                                                    </div>
+                                                </div>
+                                            </div>
+
+                                            <div className="space-y-1.5">
+                                                <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest px-1">System Prompt (Persona)</label>
+                                                <textarea
+                                                    required
+                                                    value={editingAgent.system_prompt}
+                                                    onChange={e => setEditingAgent({ ...editingAgent, system_prompt: e.target.value })}
+                                                    rows={6}
+                                                    placeholder="Define como o agente se deve comportar..."
+                                                    className="w-full p-4 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-primary-100 outline-none font-medium transition-all text-sm resize-none"
+                                                />
+                                            </div>
+                                            <div className="flex items-center gap-2 pt-2">
+                                                <label className="text-sm font-medium text-slate-600">Estado:</label>
+                                                <button
+                                                    type="button"
+                                                    onClick={() => setEditingAgent({ ...editingAgent, status: editingAgent.status === 'live' ? 'disabled' : 'live' })}
+                                                    className={`px-4 py-1.5 rounded-full text-[10px] font-bold uppercase transition-all ${editingAgent.status === 'live' ? 'bg-green-100 text-green-700' : 'bg-slate-100 text-slate-400'}`}
+                                                >
+                                                    {editingAgent.status === 'live' ? 'Ativo' : 'Desativado'}
+                                                </button>
+                                            </div>
+
+                                            {/* Knowledge Base Section inside Agent Form */}
+                                            {!editingAgent.id ? (
+                                                <div className="bg-primary-50/50 p-6 rounded-2xl border border-primary-100/50 text-center animate-pulse">
+                                                    <p className="text-xs font-semibold text-primary-700">Guarde o Agente primeiro para ativar a Base de Conhecimento.</p>
+                                                </div>
+                                            ) : (
+                                                <div className="bg-slate-50 p-5 rounded-2xl border border-slate-100 space-y-4">
+                                                    <div className="flex items-center justify-between">
+                                                        <p className="text-[10px] uppercase font-bold text-slate-400 tracking-widest px-1">Base de Conhecimento (Ficheiros)</p>
+                                                        <label className="cursor-pointer text-primary-600 hover:text-primary-700 text-[11px] font-bold flex items-center gap-1 transition-all">
+                                                            <Plus size={14} /> Adicionar PDF
+                                                            <input type="file" className="hidden" accept=".pdf" onChange={(e) => handleFileUpload(e, editingAgent.id || '')} disabled={uploading} />
+                                                        </label>
+                                                    </div>
+
+                                                    <div className="space-y-2 max-h-[160px] overflow-y-auto pr-2 scrollbar-thin">
+                                                        {loading ? (
+                                                            <div className="py-2 text-center text-slate-400 text-[10px] flex items-center justify-center gap-2">
+                                                                <Loader2 size={10} className="animate-spin" /> Carregando...
+                                                            </div>
+                                                        ) : documents.filter(d => d.agent_id === editingAgent.id).length === 0 ? (
+                                                            <div className="py-4 text-center text-slate-400 text-[10px] bg-white rounded-xl border border-dashed border-slate-200">
+                                                                Nenhum ficheiro para este agente.
+                                                            </div>
+                                                        ) : (
+                                                            documents.filter(d => d.agent_id === editingAgent.id).map(doc => (
+                                                                <div key={doc.id} className="bg-white p-2.5 rounded-xl border border-slate-100 flex items-center justify-between group shadow-sm transition-all hover:border-primary-100">
+                                                                    <div className="flex items-center gap-2 overflow-hidden px-1">
+                                                                        <FileText size={14} className="text-primary-500 shrink-0" />
+                                                                        <span className="text-[10px] font-bold text-slate-700 truncate">{doc.filename}</span>
+                                                                    </div>
+                                                                    <div className="flex items-center gap-2">
+                                                                        <span className={`px-2 py-0.5 rounded-lg text-[7px] font-bold uppercase tracking-wider ${doc.status === 'ready' ? 'bg-green-50 text-green-600' : 'bg-amber-50 text-amber-600'}`}>
+                                                                            {doc.status}
+                                                                        </span>
+                                                                        <button type="button" onClick={() => deleteDocument(doc.id, doc.storage_path)} className="p-1.5 text-slate-300 hover:text-red-500 transition-colors">
+                                                                            <Trash2 size={14} />
+                                                                        </button>
+                                                                    </div>
+                                                                </div>
+                                                            ))
+                                                        )}
+                                                    </div>
+
+                                                    <div className="pt-4 border-t border-slate-200/50 space-y-3">
+                                                        <div className="flex items-center justify-between px-1">
+                                                            <p className="text-[10px] uppercase font-bold text-slate-400 tracking-widest">Temas de conversa</p>
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => setEditingAgent({ ...editingAgent, suggested_prompts: [...(editingAgent.suggested_prompts || []), ''] })}
+                                                                className="text-primary-600 hover:text-primary-700 text-[10px] font-bold flex items-center gap-1"
+                                                            >
+                                                                <Plus size={12} /> Adicionar Tema
+                                                            </button>
+                                                        </div>
+                                                        <div className="space-y-2">
+                                                            {(editingAgent.suggested_prompts || ['']).map((prompt, idx) => (
+                                                                <div key={idx} className="flex items-center gap-2 group">
+                                                                    <input
+                                                                        value={prompt}
+                                                                        onChange={e => {
+                                                                            const newPrompts = [...(editingAgent.suggested_prompts || [])];
+                                                                            newPrompts[idx] = e.target.value;
+                                                                            setEditingAgent({ ...editingAgent, suggested_prompts: newPrompts });
+                                                                        }}
+                                                                        placeholder="Ex: Como posso ajudar?"
+                                                                        className="flex-1 p-2.5 bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-primary-100 outline-none font-medium transition-all text-xs"
+                                                                    />
+                                                                    <button
+                                                                        type="button"
+                                                                        onClick={() => {
+                                                                            const newPrompts = (editingAgent.suggested_prompts || []).filter((_, i) => i !== idx);
+                                                                            setEditingAgent({ ...editingAgent, suggested_prompts: newPrompts });
+                                                                        }}
+                                                                        className="p-2 text-slate-300 hover:text-red-500 transition-colors bg-white border border-slate-200 rounded-xl"
+                                                                    >
+                                                                        <X size={14} />
+                                                                    </button>
+                                                                </div>
+                                                            ))}
+                                                        </div>
+                                                        <p className="text-[9px] text-slate-400 italic">Estes temas aparecerão como sugestões rápidas no início do chat.</p>
+                                                    </div>
+
+                                                    <div className="pt-4 border-t border-slate-200/50 space-y-2">
+                                                        <p className="text-[10px] uppercase font-bold text-slate-400 tracking-widest px-1">Base de Conhecimento (Texto)</p>
+                                                        <textarea
+                                                            value={editingAgent.description}
+                                                            onChange={e => setEditingAgent({ ...editingAgent, description: e.target.value })}
+                                                            placeholder="Adicione informações, regras ou factos adicionais..."
+                                                            rows={4}
+                                                            className="w-full p-3 bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-primary-100 outline-none font-medium transition-all text-xs resize-none"
+                                                        />
+                                                        <p className="text-[9px] text-slate-400 italic">Este texto servirá como conhecimento base para todas as respostas deste agente.</p>
+                                                    </div>
+                                                </div>
+                                            )}
+                                        </div>
+                                        <div className="p-6 bg-slate-50 border-t border-slate-100 flex justify-end gap-3 shrink-0">
+                                            <button type="button" onClick={() => setEditingAgent(null)} className="px-6 py-2.5 font-bold text-slate-500 hover:bg-slate-200 rounded-xl transition-all">Cancelar</button>
+                                            <button type="submit" disabled={savingAgent} className="px-8 py-2.5 bg-primary-600 text-white font-bold rounded-xl hover:bg-primary-700 transition-all shadow-lg shadow-primary-100 disabled:opacity-50 flex items-center gap-2">
+                                                {savingAgent ? <Loader2 size={18} className="animate-spin" /> : <CheckCircle2 size={18} />}
+                                                Guardar Agente
+                                            </button>
+                                        </div>
+                                    </form>
+                                </div>
+                            )}
+
+                            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                                {loadingAgents ? (
+                                    <div className="col-span-full flex flex-col items-center justify-center py-20 text-slate-400">
+                                        <Loader2 className="animate-spin mb-2" />
+                                        <span>A carregar agentes...</span>
+                                    </div>
+                                ) : agents.length === 0 ? (
+                                    <div className="col-span-full text-center py-20 bg-white rounded-3xl border-2 border-dashed border-slate-200">
+                                        <LayoutDashboard className="mx-auto text-slate-300 mb-4" size={48} />
+                                        <p className="text-slate-500">Nenhum agente configurado. Crie o primeiro!</p>
+                                    </div>
+                                ) : (
+                                    agents.map((agent) => (
+                                        <div key={agent.id} className="bg-white rounded-[2rem] border border-slate-200/50 shadow-sm overflow-hidden flex flex-col hover:shadow-2xl hover:border-primary-200/50 transition-all group animate-slide-up">
+                                            <div className="p-8 flex-1">
+                                                <div className="flex items-start justify-between mb-6">
+                                                    <div className={`w-14 h-14 rounded-2xl flex items-center justify-center text-white font-bold text-2xl shadow-xl shadow-primary-500/10 ${agent.visibility === 'private' ? 'bg-amber-500' : 'bg-primary-600'}`}>
+                                                        {agent.name[0]}
+                                                    </div>
+                                                    <div className="flex items-center gap-1.5 grayscale group-hover:grayscale-0 transition-all">
+                                                        <button
+                                                            onClick={() => setEditingAgent({
+                                                                ...agent,
+                                                                suggested_prompts: agent.suggested_prompts || []
+                                                            })}
+                                                            className="p-2 text-slate-400 hover:text-primary-600 transition-colors bg-slate-50 rounded-xl"
+                                                        >
+                                                            <Settings size={18} />
+                                                        </button>
+                                                        <button onClick={() => deleteAgent(agent.id!)} className="p-2 text-slate-400 hover:text-red-600 transition-colors bg-slate-50 rounded-xl"><Trash2 size={18} /></button>
+                                                    </div>
+                                                </div>
+                                                <h3 className="font-bold text-slate-800 text-xl tracking-tight group-hover:text-primary-600 transition-colors">{agent.name}</h3>
+                                                <p className="text-slate-500 text-sm mt-2 line-clamp-2 leading-relaxed">{agent.description || 'Sem descrição.'}</p>
+
+                                                <div className="flex items-center gap-2 mt-6">
+                                                    <span className={`px-2.5 py-1 rounded-lg text-[9px] font-bold uppercase tracking-wider ${agent.visibility === 'public' ? 'bg-blue-50 text-blue-600' : 'bg-amber-50 text-amber-600'}`}>
+                                                        {agent.visibility}
+                                                    </span>
+                                                    <span className={`px-2.5 py-1 rounded-lg text-[9px] font-bold uppercase tracking-wider ${agent.status === 'live' ? 'bg-green-50 text-green-600' : 'bg-slate-100 text-slate-400'}`}>
+                                                        {agent.status}
+                                                    </span>
+                                                </div>
+                                            </div>
+                                            <div className="p-5 bg-slate-50/50 flex items-center justify-between border-t border-slate-100/50">
+                                                <span className="text-[9px] text-slate-400 font-bold uppercase tracking-widest pl-3">Prompt: {agent.system_prompt.length} carateres</span>
+                                                <div className="w-2 h-2 rounded-full bg-green-500/50 animate-pulse mr-3" />
+                                            </div>
+                                        </div>
+                                    ))
                                 )}
                             </div>
                         </div>
