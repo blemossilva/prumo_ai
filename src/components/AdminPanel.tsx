@@ -202,16 +202,7 @@ export const AdminPanel = ({ onBack }: { onBack: () => void }) => {
         setLoading(false);
     };
 
-    const triggerIngest = async (docId: string, agentId?: string) => {
-        try {
-            await supabase.functions.invoke('ingest', {
-                body: { document_id: docId }
-            });
-            fetchDocuments(agentId);
-        } catch (err) {
-            console.error('Erro ao processar:', err);
-        }
-    };
+
 
     const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>, agentId?: string) => {
         const file = e.target.files?.[0];
