@@ -74,8 +74,19 @@ Deno.serve(async (req: Request) => {
 
         const vectorContext = documents?.map((doc: any) => doc.content).join("\n---\n") || "";
 
+        // Check if CONHECIMENTO_MANUAL exists for this agent to avoid duplicate text
+        const { data: manualDoc } = await supabase
+            .from('documents')
+            .select('id')
+            .eq('agent_id', agent_id)
+            .eq('filename', 'CONHECIMENTO_MANUAL')
+            .single();
+
+        // If CONHECIMENTO_MANUAL exists, we assume knowledgeText is already in vectorContext
+        const finalKnowledgeText = manualDoc ? '' : knowledgeText;
+
         // Combine manual knowledge text + vector context
-        const contextText = [knowledgeText, vectorContext].filter(Boolean).join("\n---\n") || "Nenhuma informação adicional disponível.";
+        const contextText = [finalKnowledgeText, vectorContext].filter(Boolean).join("\n---\n") || "Nenhuma informação adicional disponível.";
 
         const fullPrompt = `Contexto de Conhecimento:\n${contextText}\n\nPergunta do Utilizador: ${message}`;
 

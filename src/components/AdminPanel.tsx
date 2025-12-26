@@ -229,9 +229,67 @@ export const AdminPanel = ({ onBack }: { onBack: () => void }) => {
                 console.error('Erro Supabase:', error);
                 alert(`Erro ao guardar: ${error.message}`);
             } else {
-                if (data) setEditingAgent(data);
+                if (data) {
+                    setEditingAgent(data);
+
+                    // Ingest knowledge_text if it exists
+                    if (data.knowledge_text && data.knowledge_text.trim() !== '') {
+                        // 1. Check if a virtual document for this knowledge_text already exists
+                        const { data: existingDoc } = await supabase
+                            .from('documents')
+                            .select('id')
+                            .eq('agent_id', data.id)
+                            .eq('filename', 'CONHECIMENTO_MANUAL')
+                            .single();
+
+                        let docId = existingDoc?.id;
+
+                        if (!docId) {
+                            // 2. Create the virtual document
+                            const { data: newDoc, error: docError } = await supabase
+                                .from('documents')
+                                .insert({
+                                    agent_id: data.id,
+                                    filename: 'CONHECIMENTO_MANUAL',
+                                    status: 'uploaded',
+                                    storage_path: 'manual_text'
+                                })
+                                .select()
+                                .single();
+
+                            if (docError) {
+                                console.error('Error creating virtual document:', docError);
+                            } else {
+                                docId = newDoc.id;
+                            }
+                        }
+
+                        if (docId) {
+                            // 3. Trigger ingest
+                            await supabase.functions.invoke('ingest', {
+                                body: {
+                                    document_id: docId,
+                                    text: data.knowledge_text
+                                }
+                            });
+                        }
+                    } else {
+                        // If knowledge_text is cleared, delete the virtual document and its chunks
+                        const { data: existingDoc } = await supabase
+                            .from('documents')
+                            .select('id')
+                            .eq('agent_id', data.id)
+                            .eq('filename', 'CONHECIMENTO_MANUAL')
+                            .single();
+
+                        if (existingDoc) {
+                            await supabase.from('document_chunks').delete().eq('document_id', existingDoc.id);
+                            await supabase.from('documents').delete().eq('id', existingDoc.id);
+                        }
+                    }
+                }
                 fetchAgents();
-                alert('Agente guardado! Já pode adicionar a base de conhecimento.');
+                alert('Agente guardado e conhecimento processado!');
             }
         } catch (err: any) {
             console.error('Erro fatal ao guardar:', err);
@@ -582,8 +640,8 @@ export const AdminPanel = ({ onBack }: { onBack: () => void }) => {
                                                         onChange={e => setEditingAgent({ ...editingAgent, visibility: e.target.value as any })}
                                                         className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-primary-100 outline-none font-medium transition-all text-slate-800"
                                                     >
-                                                        <option value="public">Público (Todos)</option>
-                                                        <option value="private">Privado (Apenas Admin)</option>
+                                                        <option value="public">Público (Acessível a todos)</option>
+                                                        <option value="private">Restrito (Admin e Grupos)</option>
                                                     </select>
                                                 </div>
                                             </div>
@@ -809,7 +867,7 @@ export const AdminPanel = ({ onBack }: { onBack: () => void }) => {
 
                                                 <div className="flex items-center gap-2 mt-6">
                                                     <span className={`px-2.5 py-1 rounded-lg text-[9px] font-bold uppercase tracking-wider ${agent.visibility === 'public' ? 'bg-blue-50 text-blue-600' : 'bg-amber-50 text-amber-600'}`}>
-                                                        {agent.visibility}
+                                                        {agent.visibility === 'public' ? 'Público' : 'Restrito'}
                                                     </span>
                                                     <span className={`px-2.5 py-1 rounded-lg text-[9px] font-bold uppercase tracking-wider ${agent.status === 'live' ? 'bg-green-50 text-green-600' : 'bg-slate-100 text-slate-400'}`}>
                                                         {agent.status}

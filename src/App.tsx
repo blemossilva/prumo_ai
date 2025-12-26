@@ -146,32 +146,37 @@ function App() {
       let query = supabase.from('agents').select('*');
 
       if (profileData?.role !== 'admin') {
-        // If not admin, only fetch agents that belong to groups the user is a member of
-        // OR agents that are public
-        const { data: memberGroups } = await supabase
+        const { data: memberGroups, error: groupsError } = await supabase
           .from('user_group_members')
           .select('group_id')
           .eq('user_id', userId);
 
+        if (groupsError) {
+          console.error('Error fetching member groups:', groupsError);
+        }
+
         const groupIds = memberGroups?.map(mg => mg.group_id) || [];
 
         if (groupIds.length > 0) {
-          const { data: agentIdsData } = await supabase
+          const { data: agentIdsData, error: agentsDataError } = await supabase
             .from('user_group_agents')
             .select('agent_id')
             .in('group_id', groupIds);
+
+          if (agentsDataError) {
+            console.error('Error fetching group agents:', agentsDataError);
+          }
 
           const agentIds = agentIdsData?.map(ag => ag.agent_id) || [];
 
           if (agentIds.length > 0) {
             // Include agents from groups OR public agents
-            query = query.or(`id.in.(${agentIds.map(id => `"${id}"`).join(',')}),visibility.eq.public`);
+            // PostgREST .in. for UUIDs should not use quotes
+            query = query.or(`id.in.(${agentIds.join(',')}),visibility.eq.public`);
           } else {
-            // No specific agents for groups, only show public
             query = query.eq('visibility', 'public');
           }
         } else {
-          // User belongs to no groups, only show public agents
           query = query.eq('visibility', 'public');
         }
       }
@@ -473,7 +478,7 @@ function App() {
           <div className="px-4 mb-4">
             <p className="text-[10px] uppercase font-bold text-slate-400 dark:text-slate-500 mb-3 tracking-widest px-2">Agentes</p>
             <div className="flex flex-col gap-1">
-              {agents.filter(a => profile?.role === 'admin' || (a.visibility === 'public' && a.status === 'live')).map((agent) => (
+              {agents.filter(a => profile?.role === 'admin' || a.status === 'live').map((agent) => (
                 <button
                   key={agent.id}
                   onClick={() => {

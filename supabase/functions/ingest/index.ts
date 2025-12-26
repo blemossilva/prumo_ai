@@ -21,7 +21,7 @@ Deno.serve(async (req: Request) => {
     }
 
     try {
-        const { document_id } = await req.json();
+        const { document_id, text } = await req.json();
         const supabase = createClient(
             Deno.env.get('SUPABASE_URL') ?? '',
             Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
@@ -39,24 +39,30 @@ Deno.serve(async (req: Request) => {
 
         await supabase.from('documents').update({ status: 'processing' }).eq('id', document_id);
 
-        console.log(`[INGEST] Baixando do storage: ${doc.storage_path}`);
-        const { data: fileData, error: storageError } = await supabase.storage
-            .from('hr_kb')
-            .download(doc.storage_path);
-
-        if (storageError) throw storageError;
-
-        // 3. Extract text using PDF.js
-        console.log("[INGEST] Extraindo texto do PDF...");
-        const arrayBuffer = await fileData.arrayBuffer();
-        const pdf = await pdfjs.getDocument({ data: arrayBuffer }).promise;
-
         let fullText = "";
-        for (let i = 1; i <= pdf.numPages; i++) {
-            const page = await pdf.getPage(i);
-            const textContent = await page.getTextContent();
-            const pageText = textContent.items.map((item: any) => item.str).join(" ");
-            fullText += pageText + "\n\n";
+
+        if (text) {
+            console.log("[INGEST] Usando texto fornecido diretamente...");
+            fullText = text;
+        } else {
+            console.log(`[INGEST] Baixando do storage: ${doc.storage_path}`);
+            const { data: fileData, error: storageError } = await supabase.storage
+                .from('hr_kb')
+                .download(doc.storage_path);
+
+            if (storageError) throw storageError;
+
+            // 3. Extract text using PDF.js
+            console.log("[INGEST] Extraindo texto do PDF...");
+            const arrayBuffer = await fileData.arrayBuffer();
+            const pdf = await pdfjs.getDocument({ data: arrayBuffer }).promise;
+
+            for (let i = 1; i <= pdf.numPages; i++) {
+                const page = await pdf.getPage(i);
+                const textContent = await page.getTextContent();
+                const pageText = textContent.items.map((item: any) => item.str).join(" ");
+                fullText += pageText + "\n\n";
+            }
         }
 
         console.log(`[INGEST] Texto extraído (${fullText.length} caracteres)`);
