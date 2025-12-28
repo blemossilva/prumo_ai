@@ -24,7 +24,27 @@ Deno.serve(async (req: Request) => {
 
         const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
 
-        // 1. AI Model Listing
+        // --- AUTHENTICATION & MULTITENANCY CONTEXT ---
+        const authHeader = req.headers.get('Authorization');
+        const { data: { user: adminUser }, error: authError } = await supabase.auth.getUser(authHeader?.split(' ')[1]);
+        if (authError || !adminUser) throw new Error("Não autorizado");
+
+        // Get admin's profile to check role and tenant
+        const { data: adminProfile } = await supabase
+            .from('profiles')
+            .select('role, tenant_id, is_super_admin')
+            .eq('id', adminUser.id)
+            .single();
+
+        if (!adminProfile || (adminProfile.role !== 'admin' && !adminProfile.is_super_admin)) {
+            throw new Error("Acesso negado: Requer privilégios de administrador");
+        }
+
+        const isAdmin = adminProfile.role === 'admin';
+        const isSuperAdmin = adminProfile.is_super_admin === true;
+        const tenant_id = adminProfile.tenant_id;
+
+        // 1. AI Model Listing (Allowed for all admins)
         if (action === 'list-models') {
             if (provider === 'openai') {
                 const res = await fetch("https://api.openai.com/v1/models", {
@@ -49,8 +69,31 @@ Deno.serve(async (req: Request) => {
 
         // 2. User Management
         if (action === 'list-users') {
-            // Join with auth.users would be ideal but since we only have public.profiles:
-            const { data: users, error } = await supabase.from('profiles').select('*').order('created_at', { ascending: false });
+            console.log('[DEBUG] list-users - Admin Profile:', {
+                adminUserId: adminUser.id,
+                tenant_id,
+                isSuperAdmin,
+                isAdmin
+            });
+
+            let query = supabase.from('profiles').select('*');
+
+            // If not super admin, filter by tenant
+            if (!isSuperAdmin) {
+                console.log('[DEBUG] Filtering by tenant_id:', tenant_id);
+                query = query.eq('tenant_id', tenant_id);
+            } else {
+                console.log('[DEBUG] Super Admin - No tenant filtering');
+            }
+
+            const { data: users, error } = await query.order('created_at', { ascending: false });
+
+            console.log('[DEBUG] Query result:', {
+                userCount: users?.length,
+                error: error?.message,
+                sampleUser: users?.[0]
+            });
+
             if (error) throw error;
             return new Response(JSON.stringify({ users }), { headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" } });
         }
@@ -59,6 +102,23 @@ Deno.serve(async (req: Request) => {
             const body = await req.json();
             const { id, ...updates } = body;
             if (!id) throw new Error("User ID required");
+
+            // Security Check: Ensure admin is managing a user in their own tenant
+            if (!isSuperAdmin) {
+                const { data: targetUser } = await supabase
+                    .from('profiles')
+                    .select('tenant_id')
+                    .eq('id', id)
+                    .single();
+
+                if (!targetUser || targetUser.tenant_id !== tenant_id) {
+                    throw new Error("Não autorizado a gerir este utilizador");
+                }
+
+                // Prevent tenant escalation
+                delete updates.tenant_id;
+                delete updates.is_super_admin;
+            }
 
             const { error } = await supabase.from('profiles').update(updates).eq('id', id);
             if (error) throw error;
@@ -79,11 +139,12 @@ Deno.serve(async (req: Request) => {
 
             if (authError) throw authError;
 
-            // Profile is usually created by trigger, but if not:
+            // Profile is usually created by trigger, but we update it here for tenant context
             const { error: profileError } = await supabase.from('profiles').upsert({
                 id: authUser.user.id,
                 name: name || email,
                 role: role || 'worker',
+                tenant_id: tenant_id, // Inherit creator's tenant
                 active: true
             });
 
@@ -96,11 +157,24 @@ Deno.serve(async (req: Request) => {
             const { id } = await req.json();
             if (!id) throw new Error("User ID required");
 
+            // Security Check
+            if (!isSuperAdmin) {
+                const { data: targetUser } = await supabase
+                    .from('profiles')
+                    .select('tenant_id')
+                    .eq('id', id)
+                    .single();
+
+                if (!targetUser || targetUser.tenant_id !== tenant_id) {
+                    throw new Error("Não autorizado a eliminar este utilizador");
+                }
+            }
+
             // Delete from Auth
             const { error: authError } = await supabase.auth.admin.deleteUser(id);
             if (authError) throw authError;
 
-            // Delete from public table (auth table requires auth.admin but service_role works for profiles)
+            // Delete from public table
             const { error } = await supabase.from('profiles').delete().eq('id', id);
             if (error) throw error;
 

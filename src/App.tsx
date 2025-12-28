@@ -2,6 +2,8 @@ import { useState, useEffect } from 'react'
 import { supabase } from './lib/supabase'
 import { Login } from './components/Login'
 import { AdminPanel } from './components/AdminPanel'
+import { TourGuide } from './components/TourGuide'
+import { UserProfileModal } from './components/UserProfileModal'
 import {
   LogOut,
   Send,
@@ -35,6 +37,16 @@ interface UserProfile {
   id: string;
   role: 'worker' | 'admin';
   name: string | null;
+  tenant_id: string;
+  is_super_admin: boolean;
+  onboarding_completed?: boolean;
+}
+
+interface Tenant {
+  id: string;
+  name: string;
+  logo_url: string | null;
+  theme_config: any;
 }
 
 interface Agent {
@@ -59,6 +71,7 @@ interface Conversation {
 function App() {
   const [session, setSession] = useState<any>(null)
   const [profile, setProfile] = useState<UserProfile | null>(null)
+  const [tenant, setTenant] = useState<Tenant | null>(null)
   const [loading, setLoading] = useState(true)
   const [view, setView] = useState<'chat' | 'admin'>('chat')
   const [agents, setAgents] = useState<Agent[]>([])
@@ -80,6 +93,7 @@ function App() {
   const [feedbackMsgId, setFeedbackMsgId] = useState<string | null>(null);
   const [feedbackRating, setFeedbackRating] = useState<boolean | null>(null);
   const [feedbackComment, setFeedbackComment] = useState('');
+  const [showProfileModal, setShowProfileModal] = useState(false);
 
   const selectedAgent = agents.find(a => a.id === selectedAgentId);
 
@@ -121,13 +135,26 @@ function App() {
   }, [])
 
   const fetchProfile = async (userId: string) => {
-    const { data } = await supabase
+    const { data: profileData } = await supabase
       .from('profiles')
-      .select('id, role, name')
+      .select('id, role, name, tenant_id, is_super_admin, onboarding_completed')
       .eq('id', userId)
       .single()
 
-    if (data) setProfile(data as UserProfile)
+    if (profileData) {
+      setProfile(profileData as UserProfile)
+
+      // Fetch tenant info
+      const { data: tenantData } = await supabase
+        .from('tenants')
+        .select('*')
+        .eq('id', profileData.tenant_id)
+        .single()
+
+      if (tenantData) {
+        setTenant(tenantData as Tenant)
+      }
+    }
     setLoading(false)
   }
 
@@ -136,16 +163,19 @@ function App() {
       const userId = userIdOverride || session?.user?.id;
       if (!userId) return;
 
-      // First, get the user's profile to check role
+      // First, get the user's profile to check role and super admin status
       const { data: profileData } = await supabase
         .from('profiles')
-        .select('role')
+        .select('role, is_super_admin')
         .eq('id', userId)
         .single();
 
       let query = supabase.from('agents').select('*');
 
-      if (profileData?.role !== 'admin') {
+      // Super admins see everything
+      if (profileData?.is_super_admin) {
+        // No additional filters needed for super admin
+      } else if (profileData?.role !== 'admin') {
         const { data: memberGroups, error: groupsError } = await supabase
           .from('user_group_members')
           .select('group_id')
@@ -170,8 +200,6 @@ function App() {
           const agentIds = agentIdsData?.map(ag => ag.agent_id) || [];
 
           if (agentIds.length > 0) {
-            // Include agents from groups OR public agents
-            // PostgREST .in. for UUIDs should not use quotes
             query = query.or(`id.in.(${agentIds.join(',')}),visibility.eq.public`);
           } else {
             query = query.eq('visibility', 'public');
@@ -249,6 +277,7 @@ function App() {
         .insert({
           user_id: session.user.id,
           agent_id: selectedAgentId,
+          tenant_id: profile?.tenant_id,
           title: input.substring(0, 30) + (input.length > 30 ? '...' : '')
         })
         .select()
@@ -266,6 +295,7 @@ function App() {
     const { data: userMsgData } = await supabase.from('messages').insert({
       conversation_id: convId,
       user_id: session.user.id,
+      tenant_id: profile?.tenant_id,
       role: 'user',
       content: input
     }).select().single();
@@ -295,6 +325,7 @@ function App() {
       const { data: aiMsgData } = await supabase.from('messages').insert({
         conversation_id: convId,
         user_id: session.user.id,
+        tenant_id: profile?.tenant_id,
         role: 'assistant',
         content: aiContent
       }).select().single();
@@ -310,7 +341,7 @@ function App() {
       console.error(err);
       setMessages(prev => [...prev, {
         role: 'assistant',
-        content: `Desculpe, ocorreu um erro: ${err.message || 'Verifique se o Admin configurou as AI keys!'}`
+        content: `Desculpe, ocorreu um erro: ${err.message || 'Verifique se o Administrador configurou as chaves de acesso à IA!'}`
       }]);
     } finally {
       setSending(false);
@@ -359,6 +390,7 @@ function App() {
     await supabase.from('feedback').insert({
       message_id: msgId,
       user_id: session.user.id,
+      tenant_id: profile?.tenant_id,
       rating: rating,
       comment: comment
     });
@@ -376,18 +408,32 @@ function App() {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-slate-50 flex items-center justify-center">
-        <Loader2 className="animate-spin text-primary-600" size={48} />
+      <div className="h-screen bg-slate-50 dark:bg-slate-950 flex flex-col items-center justify-center p-4">
+        <div className="relative">
+          <Loader2 className="animate-spin text-primary-600 mb-4" size={48} />
+          <div className="absolute inset-0 blur-xl bg-primary-500/20 animate-pulse" />
+        </div>
+        <p className="text-slate-500 dark:text-slate-400 font-extrabold uppercase tracking-widest text-[10px] animate-pulse">A preparar o Nexio AI...</p>
       </div>
     )
   }
 
-  if (!session) {
+  // Detect if we are in an invite flow or if the user hasn't finished setup
+  const isAuthRedirect = typeof window !== 'undefined' && (
+    window.location.hash.includes('type=invite') ||
+    window.location.hash.includes('type=recovery') ||
+    window.location.hash.includes('access_token=')
+  );
+
+  // If user is logged in but has no name, they probably need setup
+  const needsSetup = session && profile && !profile.name;
+
+  if (!session || isAuthRedirect || needsSetup) {
     return <Login />
   }
 
-  if (view === 'admin' && profile?.role === 'admin') {
-    return <AdminPanel onBack={() => setView('chat')} />
+  if (view === 'admin' && (profile?.role === 'admin' || profile?.is_super_admin)) {
+    return <AdminPanel onBack={() => setView('chat')} userProfile={profile} tenant={tenant} />
   }
 
   return (
@@ -400,17 +446,32 @@ function App() {
           >
             <Menu size={20} />
           </button>
-          <div className="w-10 h-10 flex items-center justify-center p-1.5 bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-slate-200/50 dark:border-white/5">
-            <img
-              src="/nexio_ai_icone.png"
-              alt="Nexio AI Icon"
-              className="w-full h-full object-contain"
-            />
+          <div className="flex items-center gap-2">
+            <div className="w-10 h-10 flex items-center justify-center p-1.5 bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-slate-200/50 dark:border-white/5">
+              <img
+                src={tenant?.logo_url || "/nexio_ai_icone.png"}
+                alt="Nexio AI"
+                className="w-full h-full object-contain"
+              />
+            </div>
+            <div className="flex flex-col">
+              <span className="text-xs font-black text-primary-600 dark:text-primary-400 uppercase tracking-tighter leading-none">Nexio AI</span>
+              <span className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest leading-none mt-1">{tenant?.name || 'Sistema'}</span>
+            </div>
           </div>
-          <h1 className="text-base md:text-lg font-bold tracking-tight text-slate-800 dark:text-white truncate max-w-[150px] md:max-w-none">
-            {selectedAgent?.name || 'Nexio AI'}
-          </h1>
-          {profile?.role === 'admin' && (
+          <div className="h-8 w-[1px] bg-slate-200 dark:bg-slate-800 mx-1 hidden md:block" />
+          <div className="flex flex-col hidden sm:flex">
+            <span className="text-[10px] uppercase font-bold text-slate-400 leading-none mb-1">Agente Ativo</span>
+            <h1 className="text-sm font-bold tracking-tight text-slate-800 dark:text-white truncate max-w-[150px] md:max-w-none leading-none">
+              {selectedAgent?.name || 'Nexio AI'}
+            </h1>
+          </div>
+          {profile?.is_super_admin && (
+            <span className="hidden sm:flex ml-2 px-2 py-0.5 bg-amber-50 dark:bg-amber-900/40 text-amber-600 dark:text-amber-400 text-[9px] font-bold uppercase rounded-md items-center gap-1">
+              <Shield size={10} /> Super Admin
+            </span>
+          )}
+          {!profile?.is_super_admin && profile?.role === 'admin' && (
             <span className="hidden sm:flex ml-2 px-2 py-0.5 bg-primary-50 dark:bg-primary-900/40 text-primary-600 dark:text-primary-400 text-[9px] font-bold uppercase rounded-md items-center gap-1">
               <Shield size={10} /> Admin
             </span>
@@ -426,12 +487,15 @@ function App() {
             {darkMode ? <Sun size={20} /> : <Moon size={20} />}
           </button>
 
-          <div className="hidden sm:flex items-center gap-2 px-3 py-1.5 bg-white dark:bg-slate-900 rounded-full border border-color shadow-sm text-slate-600 dark:text-slate-300">
+          <button
+            onClick={() => setShowProfileModal(true)}
+            className="flex items-center gap-2 px-3 py-1.5 bg-white dark:bg-slate-900 rounded-full border border-color shadow-sm text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800 transition-all cursor-pointer"
+          >
             <User size={16} className="text-slate-400 dark:text-slate-500" />
             <span className="text-sm font-medium truncate max-w-[100px]">
               {profile?.name || session.user.email?.split('@')[0]}
             </span>
-          </div>
+          </button>
 
           <button
             onClick={handleLogout}
@@ -459,7 +523,7 @@ function App() {
         `}>
           <div className="p-4 flex flex-col gap-2">
             <div className="flex items-center justify-between md:hidden mb-4">
-              <span className="font-medium text-slate-900 dark:text-white uppercase tracking-tight">Prumo AI</span>
+              <span className="font-medium text-slate-900 dark:text-white uppercase tracking-tight">{tenant?.name || 'Nexio AI'}</span>
               <button onClick={() => setIsSidebarOpen(false)} className="p-2 text-slate-500">
                 <X size={20} />
               </button>
@@ -517,6 +581,7 @@ function App() {
           <div className="p-4 mt-auto border-t border-color flex flex-col gap-2">
             {profile?.role === 'admin' && (
               <button
+                data-tour="admin-button"
                 onClick={() => setView('admin')}
                 className="w-full py-2.5 px-4 bg-slate-800 dark:bg-slate-700 text-white rounded-xl text-xs font-bold hover:bg-slate-900 dark:hover:bg-slate-600 transition-all flex items-center justify-center gap-2"
               >
@@ -529,7 +594,7 @@ function App() {
         {/* Chat Area */}
         <section className="flex-1 overflow-y-auto bg-transparent relative scroll-smooth flex justify-center transition-colors duration-300">
           <div className="max-w-[700px] w-full flex flex-col min-h-full px-6 py-12">
-            <div className="flex-1 flex flex-col gap-10 mb-48">
+            <div className="flex-1 flex flex-col gap-10">
               {messages.length === 0 ? (
                 /* Welcome State */
                 <div className="flex flex-col items-center justify-center py-20 md:py-32 opacity-80 text-center animate-slide-up">
@@ -657,6 +722,8 @@ function App() {
                   </div>
                 </div>
               )}
+              {/* Spacer to ensure last message isn't covered by input */}
+              <div className="h-20 md:h-32" aria-hidden="true" />
             </div>
 
             {/* Sticky Input Area */}
@@ -688,6 +755,42 @@ function App() {
           </div>
         </section>
       </main>
+
+      <UserProfileModal
+        isOpen={showProfileModal}
+        onClose={() => setShowProfileModal(false)}
+        profile={profile ? { ...profile, email: session.user.email } : null}
+        tenant={tenant}
+        onProfileUpdate={(newName) => setProfile(prev => prev ? { ...prev, name: newName } : null)}
+      />
+
+      {profile?.role === 'admin' && profile.onboarding_completed === false && (
+        <TourGuide
+          run={true}
+          userId={profile.id}
+          onFinish={() => {
+            // We don't mark as complete here, just let it close so they can click the button
+            // Or we could programmatically click it? No, better let them learn.
+          }}
+          steps={[
+            {
+              content: (
+                <div className="p-2">
+                  <h3 className="text-xl font-bold text-slate-800 mb-2">Bem-vindo(a)! 👋</h3>
+                  <p className="text-slate-600">
+                    Para configurar a sua organização, agentes e equipa, aceda ao Painel de Administração.
+                  </p>
+                </div>
+              ),
+              locale: { skip: "Saltar", next: "Ok, entendi", back: "Voltar", last: "Ok" },
+              placement: 'right' as const,
+              target: '[data-tour="admin-button"]',
+              disableBeacon: true,
+            }
+          ]}
+          saveOnComplete={false} // Don't save yet, wait for Admin Panel tour
+        />
+      )}
     </div>
   )
 }
