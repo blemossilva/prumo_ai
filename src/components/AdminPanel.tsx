@@ -4,7 +4,6 @@ import {
     FileText,
     Trash2,
     Settings,
-    Users,
     CheckCircle2,
     Loader2,
     ArrowLeft,
@@ -129,8 +128,6 @@ export const AdminPanel = ({ onBack, userProfile, tenant }: AdminPanelProps) => 
     const [loadingGroups, setLoadingGroups] = useState(false);
 
     // Versioning state
-    const [agentVersions, setAgentVersions] = useState<any[]>([]);
-    const [loadingVersions, setLoadingVersions] = useState(false);
     const [editingGroup, setEditingGroup] = useState<Group | null>(null);
     const [savingGroup, setSavingGroup] = useState(false);
     const [groupMembers, setGroupMembers] = useState<string[]>([]); // list of user_ids
@@ -524,7 +521,6 @@ export const AdminPanel = ({ onBack, userProfile, tenant }: AdminPanelProps) => 
                     }
                 }
                 fetchAgents();
-                if (data.id) fetchAgentVersions(data.id);
                 alert('Agente guardado e conhecimento processado!');
             }
         } catch (err: any) {
@@ -533,24 +529,6 @@ export const AdminPanel = ({ onBack, userProfile, tenant }: AdminPanelProps) => 
         } finally {
             setSavingAgent(false);
         }
-    };
-
-    const fetchAgentVersions = async (agentId: string) => {
-        setLoadingVersions(true);
-        const { data, error } = await supabase
-            .from('agent_versions')
-            .select('*')
-            .eq('agent_id', agentId)
-            .order('created_at', { ascending: false })
-            .limit(5);
-
-        if (!error && data) setAgentVersions(data);
-        setLoadingVersions(false);
-    };
-
-    const restoreAgentVersion = (snapshot: any) => {
-        if (!confirm('Deseja repor esta versão? As alterações atuais não gravadas serão perdidas.')) return;
-        setEditingAgent(snapshot);
     };
 
     const deleteAgent = async (id: string) => {
@@ -1166,7 +1144,6 @@ export const AdminPanel = ({ onBack, userProfile, tenant }: AdminPanelProps) => 
                                         rag_bias: 0.5,
                                         tests: []
                                     });
-                                    setAgentVersions([]);
                                 }}
                                 className="border border-primary-600/30 text-primary-600 bg-white dark:bg-slate-900 px-6 py-2.5 rounded-2xl font-bold hover:bg-primary-50 transition-all flex items-center gap-2 text-sm shadow-sm"
                             >
